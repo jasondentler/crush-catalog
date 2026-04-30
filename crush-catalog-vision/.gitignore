@@ -1,0 +1,10 @@
+venv/
+*.egg-info/
+.eggs/
+build/
+dist/
+__pycache__/
+*.pyc
+models/
+.env
+ebird_cache.sqlite

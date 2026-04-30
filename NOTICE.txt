@@ -1,0 +1,9 @@
+Crush Catalog
+Copyright 2026 Jason Dentler
+
+This product includes software developed by Jason Dentler (http://jasondentler.com/).
+
+This product includes software developed by Jeffrey Friedl:
+- crush-catalog.lrplugin/lib/JSON.lua (http://regex.info/blog/lua/json)
+  Copyright 2010-2017 Jeffrey Friedl.
+  Licensed under Creative Commons Attribution 3.0 (CC-BY 3.0).
