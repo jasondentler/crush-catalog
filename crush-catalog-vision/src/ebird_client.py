@@ -19,7 +19,7 @@ class EBirdClient:
         self.session = requests_cache.CachedSession(
             "ebird_cache",
             backend="sqlite",
-            expire_after=5*60,  # Cache expires after 24 hours (in seconds)
+            expire_after=20*60,  # Cache expires in seconds
         )
 
     def get_sightings_in_region(self, lat: float, lng: float) -> set:
@@ -44,17 +44,50 @@ class EBirdClient:
         matching_values = [species_dict[code] for code in codes_of_species_sighted if code in species_dict]
 
         return matching_values
+    
+    def get_sightings_for_time_of_year(self, lat: float, lng: float, timestamp_str: str) -> set:
+        """
+        Checks across a few previous years to compile the likely seasonal list
+        """
+        try:
+            dt = datetime.datetime.strptime(timestamp_str[:10], "%Y:%m:%d")
 
-    def get_sightings_on_date(self, lat: float, lng: float, timestamp_str: str) -> set:
+            proxy_dates: list[datetime.datetime] = []
+            codes_of_species_sighted = set()
+
+            for i in range(0, 6):
+                proxy_date = dt.replace(year=dt.year - i)
+                proxy_dates.append(proxy_date)
+
+            for proxy_date in proxy_dates:
+                results = self.get_sightings_on_date(lat, lng, proxy_date)
+                for result in results:
+                    codes_of_species_sighted.add(result["speciesCode"])
+            
+            species_dict = self.get_species_code_dict()
+
+            matching_values = [species_dict[code] for code in codes_of_species_sighted if code in species_dict]
+
+            return matching_values
+
+        except ValueError:
+            print(f"⚠️ Invalid timestamp format: {timestamp_str}")
+            return set()
+
+    def get_sightings_on_date(self, lat: float, lng: float, timestamp: str | datetime.datetime) -> set:
         """Queries eBird for sightings on an exact date using resolved region or
 
         fallback.
         """
         try:
-            dt = datetime.datetime.strptime(timestamp_str[:10], "%Y:%m:%d")
+            if isinstance(timestamp, str):
+                dt = datetime.datetime.strptime(timestamp[:10], "%Y:%m:%d")
+            elif isinstance(timestamp, datetime.datetime):
+                dt = timestamp
+    
             formatted_date = dt.strftime("%Y/%m/%d")
         except ValueError:
-            print(f"⚠️ Invalid timestamp format: {timestamp_str}")
+            print(f"⚠️ Invalid timestamp format: {timestamp}")
             return set()
 
         region_code = self._get_best_region_from_coords(lat, lng)
@@ -69,7 +102,13 @@ class EBirdClient:
         try:
             data = self._get(endpoint, headers=headers)
 
-            return {obs["comName"].lower() for obs in data}
+            codes_of_species_sighted = {obj["speciesCode"] for obj in data}
+
+            species_dict = self.get_species_code_dict()
+
+            matching_values = [species_dict[code] for code in codes_of_species_sighted if code in species_dict]
+
+            return matching_values
 
         except requests.exceptions.RequestException as e:
             print(f"Error fetching data from eBird API: {e}")

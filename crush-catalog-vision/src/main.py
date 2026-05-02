@@ -69,7 +69,7 @@ def identify(cr3_path: str, identifier: BirdIdentifier, ebird: EBirdClient):
     cr3_metadata = get_cr3_metadata(cr3_path)
     latitude, longitude, timestamp = extract_coordinates_and_time(cr3_metadata)
 
-    sightings = ebird.get_sightings_in_region(latitude, longitude)
+    sightings = ebird.get_sightings_for_time_of_year(latitude, longitude, timestamp)
 
     matches = match_prediction_and_location_data(cr3_predictions, sightings)
 

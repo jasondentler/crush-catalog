@@ -5,7 +5,7 @@ import birder
 import io
 import os
 import rawpy
-
+from ultralytics import YOLO
 
 class BirdIdentifier:
     """Encapsulates the Birder model loading and inference pipeline.
@@ -21,21 +21,20 @@ class BirdIdentifier:
         self.device = torch.device(device)
         self.model_name = model_name
 
-        # 1. Load the network and its metadata
+        self.detector = YOLO("yolo11n.pt")
+        self.detector.to(self.device)
+        
         self.net, self.model_info = birder.load_pretrained_model(
             self.model_name, inference=True
         )
 
-        # 2. Set the device for the network
         self.net.to(self.device)
 
-        # 3. Setup the image transform pipeline based on model signature
         size = birder.get_size_from_signature(self.model_info.signature)
         self.transform = birder.classification_transform(
             size, self.model_info.rgb_stats
         )
 
-        # 4. Create the inverted labels map {ID: 'Common Name'}
         self.labels_map = {
             v: k for k, v in self.model_info.class_to_idx.items()
         }
@@ -44,8 +43,10 @@ class BirdIdentifier:
         """Takes a Pillow Image, runs local inference, and returns an array of
         top predictions.
         """
+        subject_img = self._get_dynamic_crop(img)
+
         # Transform the image, add batch dimension, and push to the set device
-        input_tensor = self.transform(img.convert("RGB"))
+        input_tensor = self.transform(subject_img.convert("RGB"))
         input_tensor = input_tensor.unsqueeze(0).to(self.device)
 
         # Run inference directly on the network
@@ -121,3 +122,27 @@ class BirdIdentifier:
             return self.predict(img, top_k=top_k)
 
         raise ValueError(f"Could not read or process image at {file_path}")
+
+    def _get_dynamic_crop(self, img: Image.Image) -> Image.Image:
+        """Finds the bird anywhere in the frame and crops to its bounding box."""
+        # Detect 'bird' (COCO class 14)
+        results = self.detector.predict(img, classes=[14], verbose=False)
+        
+        if not results or len(results[0].boxes) == 0:
+            return img  # Fallback to original if bird not found
+
+        # Get coordinates of the most confident detection [xmin, ymin, xmax, ymax]
+        box = results[0].boxes.xyxy.cpu().numpy()[0]
+        
+        # Add a 20% margin to provide context for the classifier
+        w, h = img.size
+        bw, bh = box[2] - box[0], box[3] - box[1]
+        
+        crop_box = (
+            max(0, box[0] - bw * 0.2),
+            max(0, box[1] - bh * 0.2),
+            min(w, box[2] + bw * 0.2),
+            min(h, box[3] + bh * 0.2)
+        )
+        
+        return img.crop(crop_box)
