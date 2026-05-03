@@ -7,3 +7,29 @@ This product includes software developed by Jeffrey Friedl:
 - crush-catalog.lrplugin/lib/JSON.lua (http://regex.info/blog/lua/json)
   Copyright 2010-2017 Jeffrey Friedl.
   Licensed under Creative Commons Attribution 3.0 (CC-BY 3.0).
+
+-------------------------------------------------------------------------------
+IMAGE ATTRIBUTION AND LICENSING
+-------------------------------------------------------------------------------
+
+This product includes sample photographic images ("Sample Images") 
+provided by Jason Dentler (http://jasondentler.com).
+
+The Sample Images are NOT licensed under the Apache License 2.0. 
+They are provided under the following restrictive terms:
+
+1. Permitted Use: You are granted a non-exclusive license to use, 
+   display, and reproduce the Sample Images solely for the purpose 
+   of development, testing, and demonstration of Crush Catalog.
+
+2. Restrictions:
+   - No Standalone Distribution: Distribution or reproduction of 
+     the Sample Images independent of the Crush Catalog source 
+     code or application is strictly prohibited.
+   - No Modification: You may not alter, transform, or build 
+     upon the Sample Images.
+
+3. Ownership: All title, ownership rights, and intellectual 
+   property rights in and to the Sample Images remain the sole 
+   property of Jason Dentler. Any other uses require prior 
+   written authorization from Jason Dentler.

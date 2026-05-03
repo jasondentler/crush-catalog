@@ -1,0 +1,10 @@
+{
+    "Lua.workspace.library": [
+        "/Users/jasondentler/.vscode/extensions/murayama-photo.lightroom-sdk-types-1.0.0/types"
+    ],
+    "python.testing.pytestArgs": [
+        "crush-catalog-vision/tests"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
+}

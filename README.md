@@ -22,6 +22,8 @@ limitations under the License.
 
 ## Credits and Third-Party Software
 
+Sample images are not included in the Apache 2.0 license. See NOTICE.txt for terms.
+
 This project incorporates the following third-party library:
 
 * **[JSON.lua](http://regex.info)** by Jeffrey Friedl.
@@ -29,4 +31,4 @@ This project incorporates the following third-party library:
   * **Compliance:** The original copyright notice, web-page links, and `AUTHOR_NOTE` string are maintained within the source file located at `crush-catalog.lrplugin/lib/JSON.lua`.
 
 ---
-*This plugin is not affiliated with or endorsed by Adobe or eBird.*
+*This plugin is not affiliated with or endorsed by Adobe, Cornell University, or eBird.*

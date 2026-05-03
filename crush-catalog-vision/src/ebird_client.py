@@ -5,234 +5,234 @@ import requests_cache
 import json
 from urllib.parse import urlencode
 
+DEBUG=False
+TIME_OF_YEAR_PROXY_DAYS = 4
+TIME_OF_YEAR_YEARS_BACK = 2
+
 class EBirdClient:
-    """A wrapper around the eBird API 2.0 to fetch bird observation data based
+    """A wrapper around the eBird API 2.0 to fetch bird observation data."""
 
-    on coordinates or fallbacks.
-    """
-
-    def __init__(self, api_token: str):
+    def __init__(self, api_token: str | None):
         self.api_token = api_token
         self.base_url = "https://api.ebird.org/v2"
         self.default_region = os.getenv("DEFAULT_EBIRD_REGION")
+        self.cache_allowable_codes = [200, 404]
 
         self.session = requests_cache.CachedSession(
             "ebird_cache",
             backend="sqlite",
-            expire_after=20*60,  # Cache expires in seconds
+            expire_after=60 * 60, # Cache responses for 1 hour
+            allowable_methods=["GET"],
+            allowable_codes=self.cache_allowable_codes,
         )
 
-    def get_sightings_in_region(self, lat: float, lng: float) -> set:
-        """Queries eBird for sightings in the region around the coordinates (or fallback)
-        """
-        codes_of_species_sighted = set()
-
-        region_code = self._get_best_region_from_coords(lat, lng)
-
+    def get_sightings_in_region(self, lat: float | None, lng: float | None, location_fallback: str | None = None) -> set:
+        region_code = self._get_best_region_from_coords(lat, lng, location_fallback)
         if not region_code:
-            print("⚠️ No region code provided or available in fallback.")
-            return set()
+            return None
 
         endpoint = f"{self.base_url}/product/spplist/{region_code}"
         headers = {"x-ebirdapitoken": self.api_token}
-
         data = self._get(endpoint, headers=headers)
-        codes_of_species_sighted.update(data)
+        return {
+            "region_code": region_code,
+            "sightings": set(data)
+        }
 
-        species_dict = self.get_species_code_dict()
-
-        matching_values = [species_dict[code] for code in codes_of_species_sighted if code in species_dict]
-
-        return matching_values
-    
-    def get_sightings_for_time_of_year(self, lat: float, lng: float, timestamp_str: str) -> set:
-        """
-        Checks across a few previous years to compile the likely seasonal list
-        """
+    def get_sightings_for_time_of_year(self, lat: float | None, lng: float | None, timestamp_str: str, location_fallback: str | None = None) -> set:
         try:
             dt = datetime.datetime.strptime(timestamp_str[:10], "%Y:%m:%d")
+            proxy_dates = []
+            for yeardelta in range(TIME_OF_YEAR_YEARS_BACK, 0, -1):
+                nearby_dates = self._get_centered_window(dt.replace(year=dt.year - yeardelta))
+                proxy_dates.extend(nearby_dates)
 
-            proxy_dates: list[datetime.datetime] = []
             codes_of_species_sighted = set()
 
-            for i in range(0, 6):
-                proxy_date = dt.replace(year=dt.year - i)
-                proxy_dates.append(proxy_date)
+            region_code = self._get_best_region_from_coords(lat, lng, location_fallback)
 
             for proxy_date in proxy_dates:
-                results = self.get_sightings_on_date(lat, lng, proxy_date)
-                for result in results:
-                    codes_of_species_sighted.add(result["speciesCode"])
-            
+                results = self.get_sightings_on_date(region_code, lat, lng, proxy_date, location_fallback=location_fallback)
+                if not results or not results.get("sightings"):
+                    continue
+                region_code = results.get("region_code")
+                sightings = results.get("sightings", [])
+                for sighting in sightings:
+                    codes_of_species_sighted.add(sighting["speciesCode"])
+
             species_dict = self.get_species_code_dict()
-
-            matching_values = [species_dict[code] for code in codes_of_species_sighted if code in species_dict]
-
-            return matching_values
+            data = [species_dict[code] for code in codes_of_species_sighted if code in species_dict]
+            result = {
+                "region_code": region_code,
+                "dates": [proxy_date.strftime("%Y/%m/%d") for proxy_date in proxy_dates],
+                "sightings": data
+            }
+            return result
 
         except ValueError:
-            print(f"⚠️ Invalid timestamp format: {timestamp_str}")
-            return set()
-
-    def get_sightings_on_date(self, lat: float, lng: float, timestamp: str | datetime.datetime) -> set:
-        """Queries eBird for sightings on an exact date using resolved region or
-
-        fallback.
-        """
+            return None
+        
+    def get_sightings_on_date(self, region_code: str | None, lat: float | None, lng: float | None, timestamp: str | datetime.datetime, location_fallback: str | None = None) -> set:
         try:
             if isinstance(timestamp, str):
                 dt = datetime.datetime.strptime(timestamp[:10], "%Y:%m:%d")
             elif isinstance(timestamp, datetime.datetime):
                 dt = timestamp
-    
             formatted_date = dt.strftime("%Y/%m/%d")
         except ValueError:
-            print(f"⚠️ Invalid timestamp format: {timestamp}")
-            return set()
-
-        region_code = self._get_best_region_from_coords(lat, lng)
+            return None
 
         if not region_code:
-            print("⚠️ No region code provided or available in fallback.")
-            return set()
+            region_code = self._get_best_region_from_coords(lat, lng, location_fallback)
+
+        if not region_code:
+            return None
 
         endpoint = f"{self.base_url}/data/obs/{region_code}/historic/{formatted_date}"
         headers = {"x-ebirdapitoken": self.api_token}
 
         try:
             data = self._get(endpoint, headers=headers)
-
             codes_of_species_sighted = {obj["speciesCode"] for obj in data}
-
             species_dict = self.get_species_code_dict()
+            results = [species_dict[code] for code in codes_of_species_sighted if code in species_dict]
 
-            matching_values = [species_dict[code] for code in codes_of_species_sighted if code in species_dict]
-
-            return matching_values
-
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching data from eBird API: {e}")
-            return set()
+            return {
+                "region_code": region_code,
+                "dates": [formatted_date],
+                "sightings": results
+            }
+        except requests.exceptions.RequestException:
+            return None
 
     def get_species_code_dict(self) -> dict[str, any]:
-        """Queries the eBird taxonomy data
-        """
         endpoint = f"{self.base_url}/ref/taxonomy/ebird"
-        params = {
-            "fmt": "json",
-        }
+        params = {"fmt": "json"}
         headers = {"x-ebirdapitoken": self.api_token}
         data = self._get(endpoint, params=params, headers=headers)
-        species_dict = {item["speciesCode"]: item for item in data}
-        return species_dict
+        return {item["speciesCode"]: item for item in data}
 
-    def _get_best_region_from_coords(self, lat: float, lng: float) -> str | None:
-
-        if lat and lng:
-            # 1. Attempt to resolve region directly from coordinates
+    def _get_best_region_from_coords(self, lat: float | None, lng: float | None, location_fallback: str | None = None) -> str | None:
+        if lat is not None and lng is not None:
             region_code = self._get_region_from_coords(lat, lng)
+            if region_code:
+                return region_code
+            
+            region_code = self._get_nearest_hotspot_region(lat, lng)
+            if region_code:
+                return region_code
 
-            # 2. Fallback to finding the NEAREST hotspot's region
-            if not region_code:
-                region_code = self._get_nearest_hotspot_region(lat, lng)
-        else:
-            region_code = None
+        region_code = self._get_region_from_fallback(location_fallback)
+        if region_code:
+            print(f"⚠️ GPS coordinates not available, using fallback region: {region_code}")
+            return region_code
 
-        # 3. Fallback to the .env default if no hotspots are found
-        if not region_code:
-            print(f"⚠️ No hotspots found. Using fallback region: {self.default_region}")
-            region_code = self.default_region
+        default_region = os.getenv("DEFAULT_EBIRD_REGION")
+        if default_region:
+            print(f"⚠️ GPS coordinates and fallback not available, using default region: {default_region}")
+            return default_region
 
-        if not region_code:
-            print("⚠️ No region code provided or available in fallback.")
-            return None
-        
-        return region_code
+        print("❌ No GPS coordinates, fallback, or default region available to determine location for eBird sightings.")
+        return None
 
     def _get_region_from_coords(self, lat: float, lng: float) -> str | None:
-        """Helper to find the eBird region code mapped directly to coordinates."""
         endpoint = f"{self.base_url}/ref/geo/pos/{lat}/{lng}?fmt=json"
         headers = {"x-ebirdapitoken": self.api_token}
-
         try:
             data = self._get(endpoint, headers=headers)
-            return data["code"] if data else None
-        except Exception as e:
+            if data and "code" in data:
+                return data["code"]
+            return None
+        except Exception:
             return None
 
-    def _get_nearest_hotspot_region(self, lat: float, lng: float) -> str | None:
-        """Finds the nearest public hotspot and returns its county/subnational
+    def _get_region_from_fallback(self, fallback: str | None) -> str | None:
+        if not fallback:
+            return None
+        fallback = fallback.strip()
+        if fallback == "":
+            return None
+        return fallback
 
-        code.
-        """
-        # Fetches up to 50km radius from your water coordinates
+    def _get_nearest_hotspot_region(self, lat: float, lng: float) -> str | None:
         endpoint = f"{self.base_url}/ref/hotspot/geo"
         headers = {"x-ebirdapitoken": self.api_token}
         params = {"lat": lat, "lng": lng, "dist": 50, "fmt": "json"}
-
         try:
             data = self._get(endpoint, headers=headers, params=params)
-
             if data:
-                # eBird naturally returns these sorted by closest distance first
                 closest_hotspot = data[0]
-
-                # We can call the hotspot info to get its subnational2 (county) code
                 loc_id = closest_hotspot["locId"]
                 return self._get_region_from_hotspot_id(loc_id)
-            else:
-                print(f"⚠️ No hotspots near coordinates: {lat}, {lng}")
-        except Exception as e:
-            print(f"⚠️ Failed to find nearby hotspots: {e}")
+            return None
+        except Exception:
             return None
 
-        return None
-
     def _get_region_from_hotspot_id(self, loc_id: str) -> str | None:
-        """Fetches the detailed region code associated with a specific hotspot
-
-        ID.
-        """
         endpoint = f"{self.base_url}/ref/hotspot/info/{loc_id}"
         headers = {"x-ebirdapitoken": self.api_token, "fmt": "json"}
-
         try:
             data = self._get(endpoint, headers=headers)
-
-            # Return county code (subnational2) or state code (subnational1)
             if "subnational2Code" in data:
                 return data["subnational2Code"]
             return data.get("subnational1Code")
-        except Exception as e:
-            print(f"⚠️ Failed to lookup region from hotspot id: {e}")
+        except Exception:
             return None
 
     def _get(self, endpoint: str, params: dict[str, any] | None = None, headers: dict[str, any] | None = None) -> any:
+        if DEBUG:
+            if params:
+                query_string = f"?{urlencode(params)}"
+            else:
+                query_string = ""
+            full_url = f"{endpoint}{query_string}"
+            print(f"Making API request: GET {full_url}")
+
         response = self.session.get(endpoint, params=params, headers=headers)
 
-        if params:
-            query_string = f"?{urlencode(params)}"
-        else:
-            query_string = ""
+        request = response.request
+        full_url = request.url
 
-        full_url=f"{endpoint}{query_string}"
+        if DEBUG:
+            if response.status_code in self.cache_allowable_codes and getattr(response, "from_cache", False):
+                print(f"⚡️ [CACHE HIT]      {request.url} - Status code: {response.status_code}")
+            elif response.status_code in self.cache_allowable_codes:
+                print(f"📡 [CACHE MISS]     {request.url} - Status code: {response.status_code}")
+            else:
+                print(f"❌ [CACHE DISABLED] {request.url} - Status code: {response.status_code}")
 
-        # Print a debug line to prove the cache is working
-        if getattr(response, "from_cache", False):
-            print(f"⚡️ [CACHE HIT]   {full_url}")
-        else:
-            print(f"📡 [NETWORK HIT] {full_url}")
+        if response.status_code == 400:
+            print(f"❌ Bad request to eBird API: {response.text}")
+            # 1. Print Request Method and URL
+            print(f"Request: GET {request.url}")
 
+            # 2. Print Request Headers
+            print("\n--- REQUEST HEADERS ---")
+            for key, value in request.headers.items():
+                print(f"{key}: {value}")
+
+        if response.status_code == 500:
+            print(f"❌ Server error from eBird API: {response.text}")
+            # 1. Print Request Method and URL
+            print(f"Request: GET {request.url}")
+
+            # 2. Print Request Headers
+            print("\n--- REQUEST HEADERS ---")
+            for key, value in request.headers.items():
+                print(f"{key}: {value}")
+
+            # 3. Print Response Headers
+            print("\n--- RESPONSE HEADERS ---")
+            for key, value in (response.headers or {}).items():
+                print(f"{key}: {value}")
+
+            print("\n--- RESPONSE BODY ---")
+            print(response.text)
 
         response.raise_for_status()
+        return response.json()
 
-        # 🎯 CHECK MIME TYPE BEFORE PARSING
-        content_type = response.headers.get("Content-Type", "")
-
-        if "application/json" not in content_type:
-            print(f"⚠️ Expected JSON, but received MIME type: {content_type}")
-            print(f"Server says: {response.text[:200]}")
-        
-        data = response.json()
-        # print(json.dumps(data, indent=2))
-        return data
+    @staticmethod
+    def _get_centered_window(target_date):
+        start_date = target_date - datetime.timedelta(days=TIME_OF_YEAR_PROXY_DAYS/2)
+        return [start_date + datetime.timedelta(days=x) for x in range(TIME_OF_YEAR_PROXY_DAYS + 1)]

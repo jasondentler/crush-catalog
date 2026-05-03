@@ -1,4 +1,4 @@
-venv/
+.venv/
 *.egg-info/
 .eggs/
 build/
@@ -7,5 +7,7 @@ __pycache__/
 *.pyc
 models/
 .env
-ebird_cache.sqlite
+.env.test
 *.pt
+*.sqlite
+.DS_Store

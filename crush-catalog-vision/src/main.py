@@ -1,107 +1,12 @@
 import os
-import json
 from pathlib import Path
 from bird_identifier import BirdIdentifier
 from ebird_client import EBirdClient
-from cr3_handler import get_cr3_metadata, extract_coordinates_and_time
-
-
-def load_env_file(filepath: str = ".env"):
-    """Manually reads an .env file and injects its variables into os.environ."""
-    if not os.path.exists(filepath):
-        return
-
-    with open(filepath, "r") as f:
-        for line in f:
-            line = line.strip()
-            # Skip comments and empty lines
-            if not line or line.startswith("#"):
-                continue
-
-            # Split by the first '=' to get key and value
-            if "=" in line:
-                key, value = line.split("=", 1)
-                os.environ[key.strip()] = value.strip()
-
-
-def normalize_name(name: str) -> str:
-    """Lowercases the string and strips hyphens to match Birder's class array."""
-    return name.lower().replace("-", " ")
-
-
-def match_prediction_and_location_data(predictions, sightings):
-    predictions_dict = {}
-    for pred in predictions:
-        key = normalize_name(pred["species"])
-        predictions_dict[key] = pred
-
-    sightings_by_common_name_dict = {}
-    for sighting in sightings:
-        key = normalize_name(sighting["comName"])
-        sightings_by_common_name_dict[key] = sighting
-
-    sightings_by_sci_name_dict = {}
-    for sighting in sightings:
-        key = normalize_name(sighting["sciName"])
-        sightings_by_sci_name_dict[key] = sighting
-
-    results = []
-    common_keys = predictions_dict.keys() & sightings_by_common_name_dict.keys()
-    sci_keys = predictions_dict.keys() & sightings_by_sci_name_dict.keys()
-
-    for key in common_keys:
-        prediction = predictions_dict[key]
-        sighting = sightings_by_common_name_dict[key]
-        results.append({**prediction, **sighting})
-
-    for key in sci_keys:
-        prediction = predictions_dict[key]
-        sighting = sightings_by_sci_name_dict[key]
-        results.append({**prediction, **sighting})
-
-    top_results = sorted(results, key=lambda x: x["rank"])[:10]
-    return top_results
-
-
-def identify(cr3_path: str, identifier: BirdIdentifier, ebird: EBirdClient):
-    print(f"🖼️ {cr3_path}")
-    cr3_predictions = identifier.predict_from_file(cr3_path, None)
-    cr3_metadata = get_cr3_metadata(cr3_path)
-    latitude, longitude, timestamp = extract_coordinates_and_time(cr3_metadata)
-
-    sightings = ebird.get_sightings_for_time_of_year(latitude, longitude, timestamp)
-
-    matches = match_prediction_and_location_data(cr3_predictions, sightings)
-
-    if matches:
-        match = matches[0]
-        data = {
-            "rank": match["rank"],
-            "confidence": match["confidence"],
-            "comName": match["comName"],
-            "sciName": match["sciName"],
-        }
-
-        print(f"✅ Confidence: {data['confidence']:.1%} (rank: {data['rank']})")
-        print(f"🧬 Scientific Name: {data['sciName']}")
-        print(f"🪶 Common Name: {data['comName']}")
-
-        if data["confidence"] < 0.5:
-            miss_count = data["rank"] - 1
-            misses = cr3_predictions[:miss_count]
-            for miss in misses:
-                print(
-                    f"🧳 {miss['species']} {miss['confidence']:.1%} (#{miss['rank']})"
-                )
-                print(json.dumps(miss, indent=2))
-
-        print()
-    else:
-        print("🛑 Failed to identify the bird species in the photo.")
-        print()
+from identification import load_env_file, identify
 
 
 def main():
+    print("🪶 Starting Crush Catalog Bird Identification Workflow")
     load_env_file()
 
     # Initialize the class (loads the heavy model to GPU once)
@@ -111,19 +16,36 @@ def main():
     print(f"  💻 Compute Device:\t{compute_device}")
 
     # 🎯 FETCH THE TOKEN FROM THE ENVIRONMENT SECURELY
+    print("🔐 Fetching eBird API token from environment...")
     ebird_token = os.getenv("EBIRD_TOKEN")
 
     # Perfect class matching
+    print("🔍 Initializing Bird Identifier...")
     identifier = BirdIdentifier(model_name=birder_model, device=compute_device)
+    print("🔍 Initializing eBird Client...")
     ebird = EBirdClient(ebird_token)
+
+    print("🔍 Testing eBird API connectivity with a sample request...")
+    ebird.get_sightings_for_time_of_year(34.0, -118.0, "2024-04-19T12:00:00Z")
+
+    print("🔍 Testing eBird API connectivity with a sample request...")
+    ebird.get_sightings_for_time_of_year(None, None, "2024-04-19T12:00:00Z")
 
     # Use .expanduser() to resolve the tilde (~) to your user home directory
     folder_path = Path("~/Pictures/2026/2026-04/2026-04-19").expanduser()
 
     # 2. Enumerate all files ending in .CR3 (case-insensitive)
+    print(f"📂 Scanning folder for CR3 files: {folder_path}")
     for path_obj in folder_path.glob("*.[Cc][Rr]3"):
         cr3_path = str(path_obj.resolve())
+        print(f"\n🪶 Processing file: {cr3_path}")
         identify(cr3_path, identifier, ebird)
+
+    # identify(
+    #     "/users/jasondentler/Pictures/2026/2026-04/2026-04-19/DA8A5506.CR3",
+    #     identifier,
+    #     ebird,
+    # )
 
 
 if __name__ == "__main__":

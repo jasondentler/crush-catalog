@@ -3,6 +3,7 @@ name = "crush-catalog-vision"
 version = "0.1.0"
 description = "Computer vision helper for Crush Catalog"
 requires-python = ">=3.11"
+pythonpath = ["."]
 dependencies = [
     "birder>=0.4.15",
     "rawpy>=0.26.1",
@@ -16,8 +17,13 @@ dependencies = [
     "ultralytics>=8.4.45",
     "lap>=0.5.13",
     "xview>=0.0.6",
+    "imgcat>=0.6.0",
+    "climage>=0.2.2",
 ]
 
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
+
+[project.optional-dependencies]
+tests = ["pytest>=8.0.0"]

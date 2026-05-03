@@ -7,8 +7,8 @@ return {
     -- Plug-in Manager panel
     LrPluginInfoProvider = "InfoProvider.lua",
     LrLibraryMenuItems = {{
-        title = LOC "$$$/CrushCatalog/x=x",
-        file = "x.lua"
+        title = LOC "$$$/CrushCatalog/BirdIdentify=Identify Bird",
+        file = "BirdIdentifyAction.lua"
     }},
 
     VERSION = {
