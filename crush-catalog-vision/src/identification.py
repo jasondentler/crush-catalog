@@ -7,6 +7,9 @@ from cr3_handler import get_cr3_metadata, extract_coordinates_and_time
 from terminal_image import TerminalImage
 
 TOP_K = 20
+LOCAL_SPECIES_CONFIDENCE_BOOST = 0.05
+SAME_FAMILY_CONFIDENCE_BOOST = 0.40
+NON_LOCAL_CONFIDENCE_PENALTY = 0.25
 
 
 def load_env_file(filepath: str = ".env"):
@@ -30,31 +33,56 @@ def normalize_name(name: str) -> str:
     return name.lower().replace("-", " ")
 
 
+def _is_same_family_as_top_prediction(prediction):
+    family = normalize_name(prediction.get("familySciName", "") or prediction.get("familyComName", ""))
+    top_family = normalize_name(
+        prediction.get("detection_top_familySciName", "") or prediction.get("detection_top_familyComName", "")
+    )
+    return family and top_family and family == top_family
+
+
+def _score_prediction(prediction, local_species_codes):
+    model_confidence = prediction.get("confidence", 0)
+    species_code = prediction.get("speciesCode")
+    is_local = species_code in local_species_codes
+    adjusted_confidence = model_confidence
+
+    if is_local:
+        adjusted_confidence = min(1.0, adjusted_confidence + LOCAL_SPECIES_CONFIDENCE_BOOST)
+        if _is_same_family_as_top_prediction(prediction):
+            adjusted_confidence = min(1.0, adjusted_confidence + SAME_FAMILY_CONFIDENCE_BOOST)
+    else:
+        adjusted_confidence = adjusted_confidence * NON_LOCAL_CONFIDENCE_PENALTY
+
+    return {
+        **prediction,
+        "model_confidence": model_confidence,
+        "confidence": adjusted_confidence,
+        "is_local": is_local,
+    }
+
+
 def match_prediction_and_location_data(predictions, sightings):
-    sightings_by_common_name = {}
-    sightings_by_sci_name = {}
-    
     if not predictions:
         return []
 
-    if not sightings or not sightings.get("sightings"):
-        return []
-    
-    for sighting in sightings.get("sightings", []):
-        sightings_by_common_name[normalize_name(sighting.get("comName", ""))] = sighting
-        sightings_by_sci_name[normalize_name(sighting.get("sciName", ""))] = sighting
+    local_sightings = sightings.get("sightings", []) if sightings else []
+    local_species_codes = set()
+    if local_sightings:
+        local_species_codes = {
+            sighting.get("speciesCode")
+            for sighting in local_sightings
+            if sighting.get("speciesCode")
+        }
 
-    matches = []
-    for pred in predictions:
-        key = normalize_name(pred.get("species", ""))
-        if key in sightings_by_common_name:
-            matches.append({**pred, **sightings_by_common_name[key]})
-        elif key in sightings_by_sci_name:
-            matches.append({**pred, **sightings_by_sci_name[key]})
+    matches = [
+        _score_prediction(prediction, local_species_codes)
+        for prediction in predictions
+    ]
 
     matches = sorted(matches, key=lambda x: x.get("confidence", 0), reverse=True)
 
-    print(f"Found {len(matches)} matches between predictions ({len(predictions)}) and sightings ({len(sightings.get('sightings', []))}).")
+    print(f"Ranked {len(matches)} predictions against {len(local_sightings)} local sightings.")
 
     return matches
 

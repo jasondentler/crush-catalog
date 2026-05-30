@@ -47,6 +47,9 @@ def test_enrich_predictions_with_taxonomy_adds_common_and_scientific_names():
             "comName": "Barn Owl",
             "sciName": "Tyto alba",
             "speciesCode": "brnowl",
+            "familyComName": "Barn-Owls",
+            "familySciName": "Tytonidae",
+            "order": "Strigiformes",
         }
     }
 
@@ -55,7 +58,43 @@ def test_enrich_predictions_with_taxonomy_adds_common_and_scientific_names():
     assert detections[0]["predictions"][0]["comName"] == "Barn Owl"
     assert detections[0]["predictions"][0]["sciName"] == "Tyto alba"
     assert detections[0]["predictions"][0]["speciesCode"] == "brnowl"
+    assert detections[0]["predictions"][0]["familySciName"] == "Tytonidae"
+    assert detections[0]["predictions"][0]["order"] == "Strigiformes"
     assert "comName" not in detections[0]["predictions"][1]
+
+
+def test_enrich_predictions_with_taxonomy_uses_scientific_name_aliases():
+    detections = [
+        {
+            "predictions": [
+                {"species": "Phalacrocorax brasilianus", "confidence": 0.94},
+                {"species": "Phalacrocorax auritus", "confidence": 0.01},
+            ],
+        }
+    ]
+    species_by_scientific_name = {
+        "nannopterum brasilianum": {
+            "comName": "Neotropic Cormorant",
+            "sciName": "Nannopterum brasilianum",
+            "speciesCode": "neocor",
+            "familySciName": "Phalacrocoracidae",
+            "order": "Suliformes",
+        },
+        "nannopterum auritum": {
+            "comName": "Double-crested Cormorant",
+            "sciName": "Nannopterum auritum",
+            "speciesCode": "doccor",
+            "familySciName": "Phalacrocoracidae",
+            "order": "Suliformes",
+        },
+    }
+
+    enrich_predictions_with_taxonomy(detections, species_by_scientific_name)
+
+    assert detections[0]["predictions"][0]["comName"] == "Neotropic Cormorant"
+    assert detections[0]["predictions"][0]["sciName"] == "Nannopterum brasilianum"
+    assert detections[0]["predictions"][1]["comName"] == "Double-crested Cormorant"
+    assert detections[0]["predictions"][1]["sciName"] == "Nannopterum auritum"
 
 
 def test_filter_predictions_to_taxonomy_removes_non_bird_predictions():
@@ -98,8 +137,20 @@ def test_resolve_location_fallback_returns_none_when_no_region(monkeypatch):
 
 def test_match_prediction_and_location_data_matches_common_and_scientific_names():
     predictions = [
-        {"species": "House Sparrow", "confidence": 0.75},
-        {"species": "Passer domesticus", "confidence": 0.65},
+        {
+            "species": "House Sparrow",
+            "confidence": 0.75,
+            "comName": "House Sparrow",
+            "sciName": "Passer domesticus",
+            "speciesCode": "houspa",
+        },
+        {
+            "species": "Passer domesticus",
+            "confidence": 0.65,
+            "comName": "House Sparrow",
+            "sciName": "Passer domesticus",
+            "speciesCode": "houspa",
+        },
     ]
     sightings = {
         "region_code": "US-CA",
@@ -114,6 +165,49 @@ def test_match_prediction_and_location_data_matches_common_and_scientific_names(
     assert len(matches) == 2
     assert matches[0]["comName"] == "House Sparrow"
     assert matches[1]["sciName"] == "Passer domesticus"
+    assert matches[0]["is_local"] is True
+    assert matches[0]["model_confidence"] == 0.75
+
+
+def test_match_prediction_and_location_data_boosts_local_same_family_matches():
+    predictions = [
+        {
+            "species": "Distant Cormorant",
+            "confidence": 0.95,
+            "comName": "Distant Cormorant",
+            "sciName": "Phalacrocorax distantus",
+            "speciesCode": "discor",
+            "familySciName": "Phalacrocoracidae",
+            "detection_top_familySciName": "Phalacrocoracidae",
+        },
+        {
+            "species": "Double-crested Cormorant",
+            "confidence": 0.55,
+            "comName": "Double-crested Cormorant",
+            "sciName": "Nannopterum auritum",
+            "speciesCode": "doccor",
+            "familySciName": "Phalacrocoracidae",
+            "detection_top_familySciName": "Phalacrocoracidae",
+        },
+    ]
+    sightings = {
+        "sightings": [
+            {
+                "comName": "Double-crested Cormorant",
+                "sciName": "Nannopterum auritum",
+                "speciesCode": "doccor",
+            }
+        ]
+    }
+
+    matches = match_prediction_and_location_data(predictions, sightings)
+
+    assert matches[0]["comName"] == "Double-crested Cormorant"
+    assert matches[0]["is_local"] is True
+    assert matches[0]["confidence"] > matches[0]["model_confidence"]
+    assert matches[1]["comName"] == "Distant Cormorant"
+    assert matches[1]["is_local"] is False
+    assert matches[1]["confidence"] < matches[1]["model_confidence"]
 
 
 def test_build_response_includes_error_when_no_best_match():

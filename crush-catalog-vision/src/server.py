@@ -18,28 +18,60 @@ DEFAULT_DEVICE_ENV = "COMPUTE_DEVICE"
 DEFAULT_EBIRD_TOKEN_ENV = "EBIRD_TOKEN"
 DEFAULT_EBIRD_REGION_ENV = "DEFAULT_EBIRD_REGION"
 
+SCIENTIFIC_NAME_ALIASES = {
+    "phalacrocorax auritus": "nannopterum auritum",
+    "phalacrocorax brasilianus": "nannopterum brasilianum",
+}
+
+
+def _find_taxonomy_match(species, species_by_scientific_name):
+    if not species:
+        return None
+
+    key = species.lower()
+    taxonomy_match = species_by_scientific_name.get(key)
+    if taxonomy_match:
+        return taxonomy_match
+
+    alias = SCIENTIFIC_NAME_ALIASES.get(key)
+    if alias:
+        return species_by_scientific_name.get(alias)
+
+    return None
+
 
 def flatten_predictions(detections):
     predictions = []
     for detection in detections:
+        top_prediction = detection.get("top_prediction") or {}
         for pred in detection.get("predictions", []):
             predictions.append({
                 **pred,
                 "detection_id": detection.get("detection_id"),
+                "detection_top_familySciName": top_prediction.get("familySciName"),
+                "detection_top_familyComName": top_prediction.get("familyComName"),
+                "detection_top_order": top_prediction.get("order"),
                 "box": detection.get("box"),
             })
     return predictions
 
 
 def enrich_predictions_with_taxonomy(detections, species_by_scientific_name):
+    taxonomy_fields = (
+        "comName",
+        "sciName",
+        "speciesCode",
+        "familyComName",
+        "familySciName",
+        "order",
+    )
     for detection in detections:
         for pred in detection.get("predictions", []):
             species = pred.get("species")
-            taxonomy_match = species_by_scientific_name.get(species.lower()) if species else None
+            taxonomy_match = _find_taxonomy_match(species, species_by_scientific_name)
             if taxonomy_match:
-                pred["comName"] = taxonomy_match.get("comName")
-                pred["sciName"] = taxonomy_match.get("sciName")
-                pred["speciesCode"] = taxonomy_match.get("speciesCode")
+                for field in taxonomy_fields:
+                    pred[field] = taxonomy_match.get(field)
 
 
 def filter_predictions_to_taxonomy(detections):
@@ -122,7 +154,7 @@ def identify_photo(file_path: str, ebird_token: str, model_name: str | None = No
     identifier = BirdIdentifier(model_name=model_name or os.getenv(DEFAULT_MODEL_ENV), device=device or os.getenv(DEFAULT_DEVICE_ENV, "cpu"))
     ebird = EBirdClient(ebird_token or os.getenv(DEFAULT_EBIRD_TOKEN_ENV))
 
-    detections = identifier.predict_from_file(file_path, top_k=5)
+    detections = identifier.predict_from_file(file_path, top_k=20)
     metadata = get_cr3_metadata(file_path)
     latitude, longitude, timestamp = extract_coordinates_and_time(metadata)
     location_source = "gps"
