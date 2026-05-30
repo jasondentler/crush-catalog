@@ -6,6 +6,7 @@ local LrPrefs = import("LrPrefs")
 local LrLogger = import("LrLogger")
 local LrPathUtils = import("LrPathUtils")
 local LrProgressScope = import("LrProgressScope")
+local LrFileUtils = import("LrFileUtils")
 local JSON = require("JSON")
 local MetadataHelpers = require("MetadataHelpers")
 local LuaHelpers = require("LuaHelpers")
@@ -16,6 +17,7 @@ local myLogger = LrLogger("com.jasondentler.crushcatalog.BirdIdentifyAction")
 myLogger:enable("logfile")
 
 local DEFAULT_BACKEND_URL = "http://127.0.0.1:8000/identify"
+local EXPORT_BATCH_SIZE = 25
 
 local function outputToLog(message)
 	myLogger:trace(message)
@@ -53,6 +55,27 @@ local function getSelectedPhotoExports(photos)
 	return exports
 end
 
+local function cleanupPhotoExports(photoExports)
+	for _, photoExport in ipairs(photoExports or {}) do
+		local exportedPhotoPath = photoExport.exportedPhotoPath
+		if exportedPhotoPath and LrFileUtils.exists(exportedPhotoPath) then
+			local success, err = LrTasks.pcall(function()
+				LrFileUtils.delete(exportedPhotoPath)
+			end)
+
+			if success then
+				outputToLog("Deleted exported temp JPEG: " .. tostring(exportedPhotoPath))
+			else
+				outputToLog(string.format(
+					"Failed to delete exported temp JPEG: %s error=%s",
+					tostring(exportedPhotoPath),
+					tostring(err)
+				))
+			end
+		end
+	end
+end
+
 local function setProgress(progressScope, completed, total, caption)
 	if not progressScope then
 		return
@@ -68,6 +91,17 @@ local function leafName(path)
 	end
 
 	return LrPathUtils.leafName(path)
+end
+
+local function getPhotoBatch(photos, startIndex, batchSize)
+	local batch = {}
+	local endIndex = math.min(startIndex + batchSize - 1, #photos)
+
+	for i = startIndex, endIndex do
+		table.insert(batch, photos[i])
+	end
+
+	return batch, endIndex
 end
 
 local function askForLocationFallback(photoPath)
@@ -257,55 +291,66 @@ local function identifySelectedPhotos()
 	local stopped = false
 
 	local success, error = LrTasks.pcall(function()
-		setProgress(progressScope, 0, photoCount, string.format("Exporting %d photo(s)...", photoCount))
-
-		local photoExports = getSelectedPhotoExports(photos)
-
-		if #photoExports == 0 then
-			setProgress(progressScope, 0, photoCount, "No photos were exported.")
-			LrDialogs.message("No Photos Exported", "No selected photos could be exported for bird identification.")
-			return
-		end
-
-		for i = 1, #photoExports do
-			local photoExport = photoExports[i]
-			local photoName = leafName(photoExport.originalPhotoPath)
-			local shouldContinue = true
+		for batchStart = 1, photoCount, EXPORT_BATCH_SIZE do
+			local photoBatch, batchEnd = getPhotoBatch(photos, batchStart, EXPORT_BATCH_SIZE)
 
 			setProgress(
 				progressScope,
 				completedPhotos,
 				photoCount,
-				string.format("Identifying photo %d of %d: %s", i, photoCount, photoName)
+				string.format("Exporting photos %d-%d of %d...", batchStart, batchEnd, photoCount)
 			)
 
-			local photoSuccess, photoError = LrTasks.pcall(function()
-				shouldContinue = sendIdentifyRequest(photoExport.exportedPhotoPath, photoExport.originalPhotoPath)
-			end)
+			local photoExports = getSelectedPhotoExports(photoBatch)
 
-			if not photoSuccess then
-				LrDialogs.message("Error Identifying Birds", "An error occurred while identifying birds in photo: " .. tostring(photoExport.originalPhotoPath) .. "\n\nError details: " .. tostring(photoError))
+			if #photoExports == 0 then
+				outputToLog(string.format("No photos were exported for batchStart=%d batchEnd=%d", batchStart, batchEnd))
 			end
 
-			completedPhotos = completedPhotos + 1
+			for batchIndex = 1, #photoExports do
+				local photoExport = photoExports[batchIndex]
+				local photoNumber = batchStart + batchIndex - 1
+				local photoName = leafName(photoExport.originalPhotoPath)
+				local shouldContinue = true
 
-			if photoSuccess and shouldContinue == false then
-				stopped = true
 				setProgress(
 					progressScope,
 					completedPhotos,
 					photoCount,
-					string.format("Stopped after photo %d of %d.", completedPhotos, photoCount)
+					string.format("Identifying photo %d of %d: %s", photoNumber, photoCount, photoName)
 				)
-				return
+
+				local photoSuccess, photoError = LrTasks.pcall(function()
+					shouldContinue = sendIdentifyRequest(photoExport.exportedPhotoPath, photoExport.originalPhotoPath)
+				end)
+
+				if not photoSuccess then
+					LrDialogs.message("Error Identifying Birds", "An error occurred while identifying birds in photo: " .. tostring(photoExport.originalPhotoPath) .. "\n\nError details: " .. tostring(photoError))
+				end
+
+				completedPhotos = completedPhotos + 1
+
+				if photoSuccess and shouldContinue == false then
+					stopped = true
+					cleanupPhotoExports(photoExports)
+					setProgress(
+						progressScope,
+						completedPhotos,
+						photoCount,
+						string.format("Stopped after photo %d of %d.", completedPhotos, photoCount)
+					)
+					return
+				end
+
+				setProgress(
+					progressScope,
+					completedPhotos,
+					photoCount,
+					string.format("Finished photo %d of %d: %s", completedPhotos, photoCount, photoName)
+				)
 			end
 
-			setProgress(
-				progressScope,
-				completedPhotos,
-				photoCount,
-				string.format("Finished photo %d of %d: %s", completedPhotos, photoCount, photoName)
-			)
+			cleanupPhotoExports(photoExports)
 		end
 
 		setProgress(progressScope, photoCount, photoCount, string.format("Finished identifying %d photo(s).", photoCount))
