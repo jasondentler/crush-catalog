@@ -55,6 +55,8 @@ local function writeReviewStats(photo, birds, reviewStats)
         birdNotBirdCount = numberOrZero(reviewStats.notBirdCount),
         birdUnsureCount = numberOrZero(reviewStats.unsureCount),
         topSuggestionConfidence = string.format("%.1f", numberOrZero(reviewStats.topSuggestionConfidence)),
+        ebirdRegionCode = tostring(reviewStats.ebirdRegionCode or ""),
+        ebirdHotspotName = tostring(reviewStats.ebirdHotspotName or ""),
     }
 
     for fieldId, value in pairs(fields) do

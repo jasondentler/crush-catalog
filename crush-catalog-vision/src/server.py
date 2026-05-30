@@ -139,7 +139,7 @@ def build_local_species(sightings):
     return sorted(local_species, key=lambda item: (item.get("comName") or item.get("sciName") or "").lower())
 
 
-def build_response(file_path: str, detections, matches, location_source: str, local_species=None):
+def build_response(file_path: str, detections, matches, location_source: str, local_species=None, location_info=None):
     # Group matches by detection_id
     matches_by_detection = {}
     for match in matches:
@@ -179,6 +179,12 @@ def build_response(file_path: str, detections, matches, location_source: str, lo
     response = {
         "file_path": file_path,
         "location_source": location_source,
+        "location": {
+            "source": location_source,
+            "region_code": location_info.get("region_code") if location_info else None,
+            "hotspot_id": location_info.get("hotspot_id") if location_info else None,
+            "hotspot_name": location_info.get("hotspot_name") if location_info else None,
+        },
         "local_species": local_species or [],
         "detections": serializable_detections,
     }
@@ -209,6 +215,7 @@ def identify_photo(file_path: str, ebird_token: str, model_name: str | None = No
             return {"error": "Missing GPS coordinates and no location fallback was provided."}
 
     sightings = ebird.get_sightings_for_time_of_year(latitude, longitude, timestamp, location_fallback=location_fallback)
+    location_info = ebird.get_location_info(latitude, longitude, location_fallback=location_fallback) if hasattr(ebird, "get_location_info") else {}
 
     enrich_predictions_with_taxonomy(detections, ebird.get_species_by_scientific_name())
     filter_predictions_to_taxonomy(detections)
@@ -216,7 +223,7 @@ def identify_photo(file_path: str, ebird_token: str, model_name: str | None = No
     matches = match_prediction_and_location_data(predictions, sightings)
     local_species = build_local_species(sightings)
 
-    return build_response(file_path, detections, matches, location_source, local_species)
+    return build_response(file_path, detections, matches, location_source, local_species, location_info)
 
 
 class BirdIDRequestHandler(BaseHTTPRequestHandler):

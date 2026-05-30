@@ -63,6 +63,20 @@ return {
             searchable = true,
             browsable = true,
         },
+        {
+            id = "ebirdRegionCode",
+            title = "Region",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "ebirdHotspotName",
+            title = "Hotspot",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
     },
     schemaVersion = 1,
 }

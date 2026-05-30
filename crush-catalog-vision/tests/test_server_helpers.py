@@ -259,10 +259,21 @@ def test_build_response_includes_error_when_no_best_match():
         detections=[],
         matches=[],
         location_source="gps",
+        location_info={
+            "region_code": "US-TX-167",
+            "hotspot_id": "L123",
+            "hotspot_name": "Tiny Marsh",
+        },
     )
 
     assert response["error"] == "No matching species were found for this photo."
     assert response["location_source"] == "gps"
+    assert response["location"] == {
+        "source": "gps",
+        "region_code": "US-TX-167",
+        "hotspot_id": "L123",
+        "hotspot_name": "Tiny Marsh",
+    }
     assert response["file_path"] == "/tmp/photo.cr3"
     assert response["local_species"] == []
 

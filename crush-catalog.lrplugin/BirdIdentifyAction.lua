@@ -316,6 +316,7 @@ local function getDetectionCount(response)
 end
 
 local function newReviewStats(response)
+	local location = response.location or {}
 	return {
 		detectedCount = getDetectionCount(response),
 		suggestedCount = 0,
@@ -324,6 +325,8 @@ local function newReviewStats(response)
 		notBirdCount = 0,
 		unsureCount = 0,
 		topSuggestionConfidence = 0,
+		ebirdRegionCode = location.region_code or "",
+		ebirdHotspotName = location.hotspot_name or "",
 	}
 end
 
