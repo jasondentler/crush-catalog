@@ -122,15 +122,16 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response)
 			tostring(detection.best_match and detection.best_match.comName),
 			tostring(detection.box and table.concat(detection.box, ","))
 		))
-		local confirmation = ConfirmDetection.confirm(exportedPhotoPath, detection, originalPhotoPath)
+		local confirmation = ConfirmDetection.confirm(exportedPhotoPath, detection, originalPhotoPath, response.local_species)
 
 		if confirmation and confirmation.status == "confirmed" then
 			outputToLog(string.format(
-				"Confirmed detection index=%d originalPhotoPath=%s commonName=%s scientificName=%s",
+				"Confirmed detection index=%d originalPhotoPath=%s commonName=%s scientificName=%s selectionSource=%s",
 				detectionIndex,
 				tostring(originalPhotoPath),
 				tostring(confirmation.commonName),
-				tostring(confirmation.scientificName)
+				tostring(confirmation.scientificName),
+				tostring(confirmation.selectionSource)
 			))
 			table.insert(birds, {
 				commonName = confirmation.commonName,

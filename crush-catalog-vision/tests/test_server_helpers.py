@@ -5,6 +5,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 from server import (
     build_response,
+    build_local_species,
     enrich_predictions_with_taxonomy,
     filter_predictions_to_taxonomy,
     flatten_predictions,
@@ -135,6 +136,23 @@ def test_resolve_location_fallback_returns_none_when_no_region(monkeypatch):
     assert resolve_location_fallback(None) is None
 
 
+def test_build_local_species_returns_sorted_unique_species():
+    sightings = {
+        "sightings": [
+            {"comName": "Double-crested Cormorant", "sciName": "Nannopterum auritum", "speciesCode": "doccor"},
+            {"comName": "Anhinga", "sciName": "Anhinga anhinga", "speciesCode": "anhing"},
+            {"comName": "Double-crested Cormorant", "sciName": "Nannopterum auritum", "speciesCode": "doccor"},
+        ]
+    }
+
+    local_species = build_local_species(sightings)
+
+    assert local_species == [
+        {"comName": "Anhinga", "sciName": "Anhinga anhinga", "speciesCode": "anhing"},
+        {"comName": "Double-crested Cormorant", "sciName": "Nannopterum auritum", "speciesCode": "doccor"},
+    ]
+
+
 def test_match_prediction_and_location_data_matches_common_and_scientific_names():
     predictions = [
         {
@@ -221,6 +239,7 @@ def test_build_response_includes_error_when_no_best_match():
     assert response["error"] == "No matching species were found for this photo."
     assert response["location_source"] == "gps"
     assert response["file_path"] == "/tmp/photo.cr3"
+    assert response["local_species"] == []
 
 
 def test_box_containment_detects_nested_duplicate_boxes():
