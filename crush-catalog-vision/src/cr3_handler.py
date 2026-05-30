@@ -2,13 +2,41 @@ import io
 import subprocess
 import json
 from PIL import Image
+import PIL
 import rawpy
+from terminal_image import TerminalImage
 
 # Metadata Tag Constants
 TAG_TIMESTAMP = "Composite:GPSDateTime"
 TAG_TIMESTAMP2 = "EXIF:CreateDate"
 TAG_LATITUDE = "Composite:GPSLatitude"
 TAG_LONGITUDE = "Composite:GPSLongitude"
+
+
+def get_image_type(data):
+    """Detects type from raw bytes."""
+    if len(data) < 12:
+        return 'unknown'
+
+    # JPEG starts with FF D8 FF
+    if data.startswith(b'\xff\xd8\xff'):
+        return 'jpeg'
+
+    # CR3 has 'ftypcrx ' starting at offset 4
+    if data[4:12] == b'ftypcrx ':
+        return 'cr3'
+
+    return 'unknown'
+
+def detect_file_type(file_path):
+    """Reads file data and calls get_image_type."""
+    try:
+        with open(file_path, 'rb') as f:
+            # Only read the first 12 bytes for efficiency
+            header_data = f.read(12)
+            return get_image_type(header_data)
+    except (FileNotFoundError, PermissionError, IOError):
+        return 'unknown'
 
 
 def get_pillow_from_cr3(cr3_path: str) -> Image.Image:
@@ -29,6 +57,31 @@ def get_pillow_from_cr3(cr3_path: str) -> Image.Image:
         # Fallback if no thumb exists: do a quick demosaic
         rgb = raw.postprocess(use_camera_wb=True, half_size=True)
         return Image.fromarray(rgb)
+
+def get_pillow_from_file(file_path: str) -> Image.Image:
+    """
+    Detects file type and returns a PIL Image object.
+    Handles CR3 raw files and standard JPEGs.
+    """
+    file_type = detect_file_type(file_path)
+
+    if file_type == 'cr3':
+        # Process RAW to RGB numpy array, then to PIL
+        return get_pillow_from_cr3(file_path)
+
+    elif file_type == 'jpeg':
+        # Standard PIL open
+        return Image.open(file_path)
+
+    else:
+        raise PIL.UnidentifiedImageError(f"Unsupported image type for {file_path}; only JPEG and CR3 files are supported")
+
+def display_image_from_file(file_path: str) -> None:
+    image = get_pillow_from_file(file_path)
+    try:
+        TerminalImage.display(image)
+    finally:
+        image.close()
 
 
 def get_cr3_metadata(cr3_path: str) -> dict:

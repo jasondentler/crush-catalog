@@ -3,7 +3,15 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
-from server import flatten_predictions, match_prediction_and_location_data, build_response
+from server import (
+    build_response,
+    enrich_predictions_with_taxonomy,
+    filter_predictions_to_taxonomy,
+    flatten_predictions,
+    match_prediction_and_location_data,
+    resolve_location_fallback,
+)
+from bird_identifier import _box_containment, _box_iou, _remove_duplicate_boxes
 
 
 def test_flatten_predictions_returns_prediction_entries():
@@ -23,6 +31,69 @@ def test_flatten_predictions_returns_prediction_entries():
     assert flat[0]["detection_id"] == 1
     assert flat[0]["box"] == [10.0, 20.0, 100.0, 120.0]
     assert flat[0]["species"] == "House Sparrow"
+
+
+def test_enrich_predictions_with_taxonomy_adds_common_and_scientific_names():
+    detections = [
+        {
+            "predictions": [
+                {"species": "Tyto alba", "confidence": 0.92},
+                {"species": "Unknown bird", "confidence": 0.08},
+            ],
+        }
+    ]
+    species_by_scientific_name = {
+        "tyto alba": {
+            "comName": "Barn Owl",
+            "sciName": "Tyto alba",
+            "speciesCode": "brnowl",
+        }
+    }
+
+    enrich_predictions_with_taxonomy(detections, species_by_scientific_name)
+
+    assert detections[0]["predictions"][0]["comName"] == "Barn Owl"
+    assert detections[0]["predictions"][0]["sciName"] == "Tyto alba"
+    assert detections[0]["predictions"][0]["speciesCode"] == "brnowl"
+    assert "comName" not in detections[0]["predictions"][1]
+
+
+def test_filter_predictions_to_taxonomy_removes_non_bird_predictions():
+    detections = [
+        {
+            "predictions": [
+                {"species": "Tyto alba", "comName": "Western Barn Owl", "sciName": "Tyto alba"},
+                {"species": "Gekko gecko"},
+                {"species": "Hippopotamus amphibius"},
+            ],
+            "top_prediction": {"species": "Tyto alba"},
+        }
+    ]
+
+    filter_predictions_to_taxonomy(detections)
+
+    assert detections[0]["predictions"] == [
+        {"species": "Tyto alba", "comName": "Western Barn Owl", "sciName": "Tyto alba"}
+    ]
+    assert detections[0]["top_prediction"]["species"] == "Tyto alba"
+
+
+def test_resolve_location_fallback_prefers_request_value(monkeypatch):
+    monkeypatch.setenv("DEFAULT_EBIRD_REGION", "US-TX-167")
+
+    assert resolve_location_fallback("US-CA") == "US-CA"
+
+
+def test_resolve_location_fallback_uses_default_region(monkeypatch):
+    monkeypatch.setenv("DEFAULT_EBIRD_REGION", "US-TX-167")
+
+    assert resolve_location_fallback(" ") == "US-TX-167"
+
+
+def test_resolve_location_fallback_returns_none_when_no_region(monkeypatch):
+    monkeypatch.delenv("DEFAULT_EBIRD_REGION", raising=False)
+
+    assert resolve_location_fallback(None) is None
 
 
 def test_match_prediction_and_location_data_matches_common_and_scientific_names():
@@ -56,3 +127,20 @@ def test_build_response_includes_error_when_no_best_match():
     assert response["error"] == "No matching species were found for this photo."
     assert response["location_source"] == "gps"
     assert response["file_path"] == "/tmp/photo.cr3"
+
+
+def test_box_containment_detects_nested_duplicate_boxes():
+    smaller_box = [2883.59, 2069.34, 3234.30, 2380.20]
+    larger_box = [2878.69, 2067.78, 3239.15, 2506.43]
+
+    assert _box_iou(smaller_box, larger_box) < 0.85
+    assert _box_containment(smaller_box, larger_box) >= 0.85
+
+
+def test_remove_duplicate_boxes_filters_nested_boxes():
+    boxes = [
+        [2883.59, 2069.34, 3234.30, 2380.20],
+        [2878.69, 2067.78, 3239.15, 2506.43],
+    ]
+
+    assert _remove_duplicate_boxes(boxes) == [boxes[0]]

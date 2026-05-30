@@ -14,6 +14,12 @@ local function trim(s)
 	return (tostring(s):match("^%s*(.-)%s*$") or "")
 end
 
+local function savePreferences(propertyTable)
+	prefs.ebirdApiKey = trim(propertyTable.ebirdApiKey)
+	prefs.backendUrl = trim(propertyTable.backendUrl)
+	prefs.defaultEbirdRegion = trim(propertyTable.defaultEbirdRegion)
+end
+
 return {
 	sectionsForTopOfDialog = function(f, propertyTable)
 		propertyTable.testStatus = "<unknown>"
@@ -108,6 +114,7 @@ return {
 
 				f:row({
 					spacing = f:control_spacing(),
+					bind_to_object = propertyTable,
 					f:static_text({
 						title = LOC("$$$/CrushCatalog/InfoProvider/BackendUrl/Label=Backend URL:"),
 					}),
@@ -120,6 +127,29 @@ return {
 						),
 					}),
 				}),
+
+				f:static_text({
+					title = LOC(
+						"$$$/CrushCatalog/InfoProvider/DefaultRegion/Instructions=Optional fallback eBird region code to use when a photo has no GPS coordinates."
+					),
+					width_in_chars = 72,
+				}),
+
+				f:row({
+					spacing = f:control_spacing(),
+					bind_to_object = propertyTable,
+					f:static_text({
+						title = LOC("$$$/CrushCatalog/InfoProvider/DefaultRegion/Label=Default region:"),
+					}),
+					f:edit_field({
+						value = LrView.bind("defaultEbirdRegion"),
+						width_in_chars = 20,
+						immediate = true,
+						tooltip = LOC(
+							"$$$/CrushCatalog/InfoProvider/DefaultRegion/Tooltip=Enter an eBird region code such as US-TX-167."
+						),
+					}),
+				}),
 			},
 		}
 	end,
@@ -127,10 +157,20 @@ return {
 	startDialog = function(propertyTable)
 		propertyTable.ebirdApiKey = tostring(prefs.ebirdApiKey or "")
 		propertyTable.backendUrl = tostring(prefs.backendUrl or "http://127.0.0.1:8000/identify")
+		propertyTable.defaultEbirdRegion = tostring(prefs.defaultEbirdRegion or "")
+
+		propertyTable:addObserver("ebirdApiKey", function()
+			savePreferences(propertyTable)
+		end)
+		propertyTable:addObserver("backendUrl", function()
+			savePreferences(propertyTable)
+		end)
+		propertyTable:addObserver("defaultEbirdRegion", function()
+			savePreferences(propertyTable)
+		end)
 	end,
 
 	endDialog = function(propertyTable)
-		prefs.ebirdApiKey = trim(propertyTable.ebirdApiKey)
-		prefs.backendUrl = trim(propertyTable.backendUrl)
+		savePreferences(propertyTable)
 	end,
 }

@@ -10,7 +10,68 @@ import rawpy
 from PIL import Image
 from ultralytics import YOLO
 
-IDENTIFY_ENTIRE_IMAGE = False
+IDENTIFY_ENTIRE_IMAGE = True
+DUPLICATE_DETECTION_IOU_THRESHOLD = 0.85
+DUPLICATE_DETECTION_CONTAINMENT_THRESHOLD = 0.85
+
+
+def _box_iou(box_a: list[float], box_b: list[float]) -> float:
+    ax1, ay1, ax2, ay2 = box_a
+    bx1, by1, bx2, by2 = box_b
+
+    inter_x1 = max(ax1, bx1)
+    inter_y1 = max(ay1, by1)
+    inter_x2 = min(ax2, bx2)
+    inter_y2 = min(ay2, by2)
+    inter_w = max(0.0, inter_x2 - inter_x1)
+    inter_h = max(0.0, inter_y2 - inter_y1)
+    intersection = inter_w * inter_h
+
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    union = area_a + area_b - intersection
+
+    if union <= 0:
+        return 0.0
+
+    return intersection / union
+
+
+def _box_containment(box_a: list[float], box_b: list[float]) -> float:
+    ax1, ay1, ax2, ay2 = box_a
+    bx1, by1, bx2, by2 = box_b
+
+    inter_x1 = max(ax1, bx1)
+    inter_y1 = max(ay1, by1)
+    inter_x2 = min(ax2, bx2)
+    inter_y2 = min(ay2, by2)
+    inter_w = max(0.0, inter_x2 - inter_x1)
+    inter_h = max(0.0, inter_y2 - inter_y1)
+    intersection = inter_w * inter_h
+
+    area_a = max(0.0, ax2 - ax1) * max(0.0, ay2 - ay1)
+    area_b = max(0.0, bx2 - bx1) * max(0.0, by2 - by1)
+    smaller_area = min(area_a, area_b)
+
+    if smaller_area <= 0:
+        return 0.0
+
+    return intersection / smaller_area
+
+
+def _remove_duplicate_boxes(boxes: list[list[float]], threshold: float = DUPLICATE_DETECTION_IOU_THRESHOLD) -> list[list[float]]:
+    unique_boxes = []
+    for box in boxes:
+        if any(
+            _box_iou(box, existing_box) >= threshold
+            or _box_containment(box, existing_box) >= DUPLICATE_DETECTION_CONTAINMENT_THRESHOLD
+            for existing_box in unique_boxes
+        ):
+            continue
+
+        unique_boxes.append(box)
+
+    return unique_boxes
 
 class BirdIdentifier:
     """Encapsulates the Birder model loading and inference pipeline.
@@ -90,9 +151,10 @@ class BirdIdentifier:
     def predict(self, img: Image.Image, top_k: int | None = 5) -> list:
         results = self.detector.predict(img, classes=[14], verbose=False)
         detections = []
+        image_width, image_height = img.size
 
         if results and len(results[0].boxes) > 0:
-            boxes = results[0].boxes.xyxy.cpu().numpy()
+            boxes = _remove_duplicate_boxes(results[0].boxes.xyxy.cpu().numpy().tolist())
             for index, box in enumerate(boxes, start=1):
                 crop = self._crop_with_margin(img, box)
                 predictions = self._classify_image(crop, top_k=top_k)
@@ -100,17 +162,22 @@ class BirdIdentifier:
                     {
                         "detection_id": index,
                         "box": [float(box[0]), float(box[1]), float(box[2]), float(box[3])],
+                        "image_width": image_width,
+                        "image_height": image_height,
                         "image": crop,
                         "predictions": predictions,
                         "top_prediction": predictions[0] if predictions else None,
                     }
                 )
         elif IDENTIFY_ENTIRE_IMAGE and img is not None:
+            w, h = img.size
             predictions = self._classify_image(img, top_k=top_k)
             detections.append(
                 {
                     "detection_id": 1,
-                    "box": None,
+                    "box": [0.0, 0.0, float(w), float(h)],
+                    "image_width": image_width,
+                    "image_height": image_height,
                     "image": img,
                     "predictions": predictions,
                     "top_prediction": predictions[0] if predictions else None,

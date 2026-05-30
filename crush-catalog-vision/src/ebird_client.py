@@ -112,6 +112,14 @@ class EBirdClient:
         data = self._get(endpoint, params=params, headers=headers)
         return {item["speciesCode"]: item for item in data}
 
+    def get_species_by_scientific_name(self) -> dict[str, any]:
+        species_by_code = self.get_species_code_dict()
+        return {
+            item["sciName"].lower(): item
+            for item in species_by_code.values()
+            if item.get("sciName")
+        }
+
     def _get_best_region_from_coords(self, lat: float | None, lng: float | None, location_fallback: str | None = None) -> str | None:
         if lat is not None and lng is not None:
             region_code = self._get_region_from_coords(lat, lng)

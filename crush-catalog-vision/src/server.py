@@ -1,4 +1,3 @@
-import base64
 import json
 import re
 import tempfile
@@ -8,14 +7,16 @@ from pathlib import Path
 
 from bird_identifier import BirdIdentifier
 from ebird_client import EBirdClient
-from cr3_handler import get_cr3_metadata, extract_coordinates_and_time
-from identification import load_env_file, normalize_name, match_prediction_and_location_data
+from cr3_handler import display_image_from_file, get_cr3_metadata, extract_coordinates_and_time
+from identification import load_env_file, match_prediction_and_location_data
+from terminal_image import TerminalImage
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8000
 DEFAULT_MODEL_ENV = "BIRDER_MODEL"
 DEFAULT_DEVICE_ENV = "COMPUTE_DEVICE"
 DEFAULT_EBIRD_TOKEN_ENV = "EBIRD_TOKEN"
+DEFAULT_EBIRD_REGION_ENV = "DEFAULT_EBIRD_REGION"
 
 
 def flatten_predictions(detections):
@@ -30,6 +31,27 @@ def flatten_predictions(detections):
     return predictions
 
 
+def enrich_predictions_with_taxonomy(detections, species_by_scientific_name):
+    for detection in detections:
+        for pred in detection.get("predictions", []):
+            species = pred.get("species")
+            taxonomy_match = species_by_scientific_name.get(species.lower()) if species else None
+            if taxonomy_match:
+                pred["comName"] = taxonomy_match.get("comName")
+                pred["sciName"] = taxonomy_match.get("sciName")
+                pred["speciesCode"] = taxonomy_match.get("speciesCode")
+
+
+def filter_predictions_to_taxonomy(detections):
+    for detection in detections:
+        detection["predictions"] = [
+            pred
+            for pred in detection.get("predictions", [])
+            if pred.get("comName") and pred.get("sciName")
+        ]
+        detection["top_prediction"] = detection["predictions"][0] if detection["predictions"] else None
+
+
 def parse_location_fallback(location_fallback: str) -> str | None:
     if not location_fallback:
         return None
@@ -37,6 +59,10 @@ def parse_location_fallback(location_fallback: str) -> str | None:
     if fallback == "":
         return None
     return fallback
+
+
+def resolve_location_fallback(location_fallback: str | None) -> str | None:
+    return parse_location_fallback(location_fallback) or parse_location_fallback(os.getenv(DEFAULT_EBIRD_REGION_ENV))
 
 
 def build_response(file_path: str, detections, matches, location_source: str):
@@ -51,7 +77,10 @@ def build_response(file_path: str, detections, matches, location_source: str):
 
     # Remove non-serializable image objects from detections and add per-detection matches
     serializable_detections = []
+    detection_number = 0
     for detection in detections:
+        detection_number = detection_number + 1
+        TerminalImage.display(detection['image'])
         detection_copy = detection.copy()
         detection_copy.pop("image", None)  # Remove PIL Image object
 
@@ -59,9 +88,15 @@ def build_response(file_path: str, detections, matches, location_source: str):
         detection_matches = matches_by_detection.get(detection_id, [])
 
         if detection_matches:
+            best_match = detection_matches[0]
+            common_name = best_match.get("comName")
+            sci_name = best_match.get("sciName")
+            confidence = best_match.get("confidence")
+            print(f"🪶 Bird #{detection_number} is probably {common_name} ({sci_name}) - {confidence:.1%}")
             detection_copy["best_match"] = detection_matches[0]
             detection_copy["alternatives"] = detection_matches[1:] if len(detection_matches) > 1 else []
         else:
+            print(f"🛑 No match for detected bird #{detection_number}")
             detection_copy["best_match"] = None
             detection_copy["alternatives"] = []
 
@@ -78,10 +113,11 @@ def build_response(file_path: str, detections, matches, location_source: str):
 
     return response
 
-
 def identify_photo(file_path: str, ebird_token: str, model_name: str | None = None, device: str | None = None, location_fallback: str | None = None):
     if not Path(file_path).is_file():
         return {"error": f"File path does not exist: {file_path}"}
+
+    display_image_from_file(file_path)
 
     identifier = BirdIdentifier(model_name=model_name or os.getenv(DEFAULT_MODEL_ENV), device=device or os.getenv(DEFAULT_DEVICE_ENV, "cpu"))
     ebird = EBirdClient(ebird_token or os.getenv(DEFAULT_EBIRD_TOKEN_ENV))
@@ -93,12 +129,14 @@ def identify_photo(file_path: str, ebird_token: str, model_name: str | None = No
 
     if latitude is None or longitude is None:
         location_source = "fallback"
-        location_fallback = parse_location_fallback(location_fallback)
+        location_fallback = resolve_location_fallback(location_fallback)
+        if not location_fallback:
+            return {"error": "Missing GPS coordinates and no location fallback was provided."}
 
     sightings = ebird.get_sightings_for_time_of_year(latitude, longitude, timestamp, location_fallback=location_fallback)
-    if location_source == "fallback" and not location_fallback:
-        return {"error": "Missing GPS coordinates and no location fallback was provided."}
 
+    enrich_predictions_with_taxonomy(detections, ebird.get_species_by_scientific_name())
+    filter_predictions_to_taxonomy(detections)
     predictions = flatten_predictions(detections)
     matches = match_prediction_and_location_data(predictions, sightings)
 
@@ -135,7 +173,7 @@ class BirdIDRequestHandler(BaseHTTPRequestHandler):
             # Extract boundary
             boundary_str = content_type.split("boundary=")[1].encode()
             image_data, ebird_token, location_fallback, filename = self._parse_multipart(body_bytes, boundary_str)
-            
+
             if not image_data:
                 self._send_json({"error": "Missing required field: image_data."}, status=400)
                 return
@@ -175,26 +213,26 @@ class BirdIDRequestHandler(BaseHTTPRequestHandler):
         ebird_token = None
         location_fallback = None
         filename = None
-        
+
         # Split by boundary
         parts = body.split(b"--" + boundary)
-        
+
         for part in parts:
             if not part or part == b"--" or part == b"--\r\n":
                 continue
-            
+
             # Split headers from content
             if b"\r\n\r\n" in part:
                 headers_section, content = part.split(b"\r\n\r\n", 1)
             else:
                 continue
-            
+
             # Remove trailing boundary marker and whitespace
             content = content.rstrip(b"\r\n")
-            
+
             # Parse headers to find field name
             headers_text = headers_section.decode('utf-8', errors='ignore')
-            
+
             if 'name="image_data"' in headers_text:
                 image_data = content
                 match = re.search(r'filename="([^"]+)"', headers_text)
@@ -204,7 +242,7 @@ class BirdIDRequestHandler(BaseHTTPRequestHandler):
                 ebird_token = content.decode('utf-8').strip()
             elif 'name="location_fallback"' in headers_text:
                 location_fallback = content.decode('utf-8').strip()
-        
+
         return image_data, ebird_token, location_fallback, filename
 
     def log_message(self, format, *args):

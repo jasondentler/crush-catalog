@@ -1,13 +1,14 @@
 # Crush Catalog Vision
 
-A helper project for bird identification using raw CR3 image data, Birder classification, and eBird sighting data.
+A helper project for bird identification using JPEG and CR3 image data, Birder classification, and eBird sighting data. The Lightroom plugin sends temporary JPEG renditions to this backend; the backend and CLI can also process CR3 files directly.
 
 ## Features
 
-- Load Canon CR3 raw images and JPEG/PNG files
+- Load Canon CR3 raw images and JPEG files
 - Detect birds with YOLO and classify species using Birder
 - Extract GPS and timestamp metadata via ExifTool
 - Query eBird for historic sightings by location and date
+- Enrich model predictions with eBird taxonomy data, including common and scientific names
 - Match model predictions with eBird location data
 - Run as a local CLI workflow or a lightweight HTTP backend
 
@@ -25,10 +26,10 @@ From the `crush-catalog-vision` folder:
 cd /Users/jasondentler/projects/crush-catalog/crush-catalog-vision
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+python -m pip install -e '.[tests]'
 ```
 
-The project dependencies are defined in `pyproject.toml`.
+The project dependencies are defined in `pyproject.toml`. The `tests` extra installs pytest for local test runs.
 
 ## Environment Variables
 
@@ -125,6 +126,7 @@ By default, the server listens on `http://127.0.0.1:8000`.
   - `image_data` - binary image payload
   - `ebird_token` - eBird API token
   - `location_fallback` - optional fallback region code when GPS is unavailable
+- Filters classification predictions through eBird taxonomy and returns common/scientific names when available
 
 ### Example request
 
@@ -141,10 +143,39 @@ The server returns JSON containing:
 
 - `file_path`
 - `location_source` (`gps` or `fallback`)
-- `detections`
-- `best_match`
-- `alternatives`
+- `detections`, where each detection can include:
+  - `detection_id`
+  - `box`
+  - `image_width`
+  - `image_height`
+  - `predictions`
+  - `best_match`
+  - `alternatives`
 - `error` when applicable
+
+Example shape:
+
+```json
+{
+  "file_path": "uploaded_image.jpg",
+  "location_source": "fallback",
+  "detections": [
+    {
+      "detection_id": 1,
+      "box": [0.0, 0.0, 2048.0, 1365.0],
+      "image_width": 2048,
+      "image_height": 1365,
+      "best_match": {
+        "comName": "Western Barn Owl",
+        "sciName": "Tyto alba",
+        "speciesCode": "brnowl",
+        "confidence": 0.93
+      },
+      "alternatives": []
+    }
+  ]
+}
+```
 
 ## Project Structure
 
@@ -170,8 +201,10 @@ You can use these files directly with the backend test `curl` command above.
 ## CR3 and metadata details
 
 - `BirdIdentifier` supports CR3 raw files by extracting thumbnails or postprocessing raw data with `rawpy`
+- The Lightroom plugin exports temporary JPEG renditions and sends those JPEGs to the backend
 - `cr3_handler.py` uses `exiftool` to extract GPS coordinates and timestamps
 - If GPS is missing, the server and CLI can use `location_fallback` or `DEFAULT_EBIRD_REGION`
+- Predictions are enriched with eBird taxonomy data before matching, so responses can include both common names (`comName`) and scientific names (`sciName`)
 
 ## Testing
 
@@ -186,4 +219,3 @@ python -m pytest tests
 - The backend stores an eBird response cache in `ebird_cache.sqlite` using `requests-cache`
 - `yolo11n.pt` will be downloaded on first use.
 - `BirdIdentifier` uses a YOLO detector to crop bird regions before classification
-```
