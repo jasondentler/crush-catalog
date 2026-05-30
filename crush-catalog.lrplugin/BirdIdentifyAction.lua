@@ -7,6 +7,9 @@ local LrLogger = import("LrLogger")
 local LrPathUtils = import("LrPathUtils")
 local LrProgressScope = import("LrProgressScope")
 local LrFileUtils = import("LrFileUtils")
+local LrView = import("LrView")
+local LrBinding = import("LrBinding")
+local LrFunctionContext = import("LrFunctionContext")
 local JSON = require("JSON")
 local MetadataHelpers = require("MetadataHelpers")
 local LuaHelpers = require("LuaHelpers")
@@ -25,6 +28,10 @@ end
 
 local function getPrefs()
 	return LrPrefs.prefsForPlugin()
+end
+
+local function trim(value)
+	return tostring(value or ""):match("^%s*(.-)%s*$") or ""
 end
 
 local function getSelectedPhotoExports(photos)
@@ -104,6 +111,171 @@ local function getPhotoBatch(photos, startIndex, batchSize)
 	return batch, endIndex
 end
 
+local function numberFromPluginProperty(photo, fieldId)
+	local success, value = LrTasks.pcall(function()
+		return photo:getPropertyForPlugin(_PLUGIN, fieldId)
+	end)
+
+	if not success then
+		outputToLog(string.format(
+			"Failed to read plugin metadata fieldId=%s error=%s",
+			tostring(fieldId),
+			tostring(value)
+		))
+		return 0
+	end
+
+	return tonumber(value) or 0
+end
+
+local function isIdentificationComplete(photo)
+	local detections = numberFromPluginProperty(photo, "birdDetectionCount")
+	if detections <= 0 then
+		return false
+	end
+
+	local reviewed = numberFromPluginProperty(photo, "birdSuggestedCount")
+		+ numberFromPluginProperty(photo, "birdLocalSpeciesCount")
+		+ numberFromPluginProperty(photo, "birdManualCount")
+		+ numberFromPluginProperty(photo, "birdNotBirdCount")
+
+	return reviewed >= detections
+end
+
+local function filterPhotosForReview(photos, reviewOptions)
+	if not reviewOptions or not reviewOptions.skipCompleted then
+		return photos
+	end
+
+	local filtered = {}
+	local skipped = 0
+	for _, photo in ipairs(photos) do
+		if isIdentificationComplete(photo) then
+			skipped = skipped + 1
+			outputToLog("Skipping completed photo: " .. tostring(photo:getRawMetadata("path")))
+		else
+			table.insert(filtered, photo)
+		end
+	end
+
+	outputToLog(string.format("Skipped %d completed photo(s)", skipped))
+	return filtered
+end
+
+local function showMultiPhotoOptionsDialog(photoCount)
+	return LrFunctionContext.callWithContext("showMultiPhotoOptionsDialog", function(context)
+		local f = LrView.osFactory()
+		local props = LrBinding.makePropertyTable(context)
+		props.skipCompleted = true
+		props.reviewMode = "prompt_always"
+		props.confidenceThreshold = tostring(getPrefs().autoAcceptConfidenceThreshold or "95")
+
+		local contents = f:column {
+			spacing = 12,
+			bind_to_object = props,
+			f:static_text {
+				title = string.format("Choose how to review %d selected photos.", photoCount),
+				width_in_chars = 56,
+			},
+			f:checkbox {
+				title = "Skip photos with complete identification metadata",
+				value = LrView.bind("skipCompleted"),
+			},
+			f:row {
+				f:radio_button {
+					title = "Prompt for every detection",
+					value = LrView.bind("reviewMode"),
+					checked_value = "prompt_always",
+				},
+			},
+			f:row {
+				f:radio_button {
+					title = "Auto-accept best suggestion at or above",
+					value = LrView.bind("reviewMode"),
+					checked_value = "prompt_threshold",
+				},
+				f:edit_field {
+					value = LrView.bind("confidenceThreshold"),
+					width_in_chars = 5,
+				},
+				f:static_text {
+					title = "% confidence, then prompt for lower-confidence detections",
+				},
+			},
+			f:row {
+				f:radio_button {
+					title = "Run unattended: accept every top suggestion",
+					value = LrView.bind("reviewMode"),
+					checked_value = "unattended_always",
+				},
+			},
+			f:row {
+				f:radio_button {
+					title = LrView.bind {
+						key = "confidenceThreshold",
+						transform = function(value)
+							local thresholdText = trim(value)
+							if thresholdText == "" then
+								thresholdText = "?"
+							end
+							return string.format(
+								"Run unattended: accept at/above %s%% and mark lower-confidence detections unsure",
+								thresholdText
+							)
+						end,
+					},
+					value = LrView.bind("reviewMode"),
+					checked_value = "unattended_threshold",
+				},
+			},
+		}
+
+		local dialogResult = LrDialogs.presentModalDialog({
+			title = "Identify Bird Options",
+			contents = contents,
+			props = props,
+			actionVerb = "Start",
+			cancelVerb = "Cancel",
+		})
+
+		if dialogResult ~= "ok" then
+			return nil
+		end
+
+		local threshold = tonumber(trim(props.confidenceThreshold))
+		if not threshold or threshold < 0 or threshold > 100 then
+			LrDialogs.message("Invalid Threshold", "Enter a confidence threshold from 0 to 100.")
+			return showMultiPhotoOptionsDialog(photoCount)
+		end
+
+		getPrefs().autoAcceptConfidenceThreshold = tostring(threshold)
+
+		return {
+			skipCompleted = props.skipCompleted == true,
+			reviewMode = props.reviewMode,
+			autoAcceptHighConfidence = props.reviewMode == "prompt_threshold",
+			autoAcceptThreshold = threshold,
+			unattended = props.reviewMode == "unattended_always" or props.reviewMode == "unattended_threshold",
+			unattendedMode = props.reviewMode == "unattended_always" and "always" or "threshold",
+		}
+	end)
+end
+
+local function getReviewOptions(photoCount)
+	if photoCount <= 1 then
+		return {
+			skipCompleted = false,
+			reviewMode = "prompt_always",
+			autoAcceptHighConfidence = false,
+			autoAcceptThreshold = tonumber(getPrefs().autoAcceptConfidenceThreshold) or 95,
+			unattended = false,
+			unattendedMode = "threshold",
+		}
+	end
+
+	return showMultiPhotoOptionsDialog(photoCount)
+end
+
 local function askForLocationFallback(photoPath)
 	local fallbackRegion = tostring(getPrefs().defaultEbirdRegion or ""):match("^%s*(.-)%s*$") or ""
 
@@ -162,6 +334,62 @@ local function updateTopSuggestionConfidence(reviewStats, detection)
 	end
 end
 
+local function getBestMatchConfidencePercent(detection)
+	local confidence = tonumber(detection and detection.best_match and detection.best_match.confidence)
+	return confidence and confidence * 100 or 0
+end
+
+local function confirmBestMatch(detection, selectionSource)
+	local match = detection and detection.best_match
+	if not match then
+		return { status = "rejected", reason = "unsure" }
+	end
+
+	local scientificName = match.sciName or match.species
+	local commonName = match.comName or match.species
+	if not scientificName or not commonName then
+		return { status = "rejected", reason = "unsure" }
+	end
+
+	return {
+		status = "confirmed",
+		commonName = commonName,
+		scientificName = scientificName,
+		confidence = getBestMatchConfidencePercent(detection),
+		selectionSource = selectionSource or "suggested",
+	}
+end
+
+local function autoReviewDetection(detection, reviewOptions)
+	if not reviewOptions then
+		return nil
+	end
+
+	local confidence = getBestMatchConfidencePercent(detection)
+
+	if reviewOptions.unattended then
+		if reviewOptions.unattendedMode == "always" then
+			outputToLog(string.format("Auto-confirming detection in unattended always mode confidence=%.1f", confidence))
+			return confirmBestMatch(detection, "suggested")
+		end
+
+		if confidence >= reviewOptions.autoAcceptThreshold then
+			outputToLog(string.format("Auto-confirming detection in unattended threshold mode confidence=%.1f", confidence))
+			return confirmBestMatch(detection, "suggested")
+		end
+
+		outputToLog(string.format("Marking detection unsure in unattended threshold mode confidence=%.1f", confidence))
+		return { status = "rejected", reason = "unsure" }
+	end
+
+	if reviewOptions.autoAcceptHighConfidence and confidence >= reviewOptions.autoAcceptThreshold then
+		outputToLog(string.format("Auto-confirming high-confidence detection confidence=%.1f", confidence))
+		return confirmBestMatch(detection, "suggested")
+	end
+
+	return nil
+end
+
 local function countConfirmation(reviewStats, confirmation)
 	if not confirmation then
 		return
@@ -184,7 +412,7 @@ local function countConfirmation(reviewStats, confirmation)
 	end
 end
 
-local function showResponse(exportedPhotoPath, originalPhotoPath, response)
+local function showResponse(exportedPhotoPath, originalPhotoPath, response, reviewOptions)
 	if not response then
 		LrDialogs.message("Bird ID Error", "The backend returned an empty response.")
 		return true
@@ -209,7 +437,10 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response)
 			tostring(detection.best_match and detection.best_match.comName),
 			tostring(detection.box and table.concat(detection.box, ","))
 		))
-		local confirmation = ConfirmDetection.confirm(exportedPhotoPath, detection, originalPhotoPath, response.local_species)
+		local confirmation = autoReviewDetection(detection, reviewOptions)
+		if not confirmation then
+			confirmation = ConfirmDetection.confirm(exportedPhotoPath, detection, originalPhotoPath, response.local_species)
+		end
 		countConfirmation(reviewStats, confirmation)
 
 		if confirmation and confirmation.status == "confirmed" then
@@ -282,7 +513,7 @@ local function postPayload(payload)
 	return decoded, nil
 end
 
-local function sendIdentifyRequest(exportedPhotoPath, originalPhotoPath)
+local function sendIdentifyRequest(exportedPhotoPath, originalPhotoPath, reviewOptions)
 	outputToLog(string.format("Sending identify request originalPhotoPath=%s exportedPhotoPath=%s", tostring(originalPhotoPath), tostring(exportedPhotoPath)))
 	local ebirdToken = tostring(getPrefs().ebirdApiKey or "")
 
@@ -320,16 +551,30 @@ local function sendIdentifyRequest(exportedPhotoPath, originalPhotoPath)
 		end
 	end
 
-	return showResponse(exportedPhotoPath, originalPhotoPath, response)
+	return showResponse(exportedPhotoPath, originalPhotoPath, response, reviewOptions)
 end
 
 local function identifySelectedPhotos()
 	local catalog = LrApplication.activeCatalog()
 	local photos = catalog:getTargetPhotos()
+	local selectedPhotoCount = #photos
+
+	if selectedPhotoCount == 0 then
+		LrDialogs.message("No Photos Selected", "Please select one or more photos before running the bird identifier.")
+		return
+	end
+
+	local reviewOptions = getReviewOptions(selectedPhotoCount)
+	if not reviewOptions then
+		outputToLog("Identification cancelled from multi-photo options dialog")
+		return
+	end
+
+	photos = filterPhotosForReview(photos, reviewOptions)
 	local photoCount = #photos
 
 	if photoCount == 0 then
-		LrDialogs.message("No Photos Selected", "Please select one or more photos before running the bird identifier.")
+		LrDialogs.message("No Photos To Identify", "All selected photos already have complete identification metadata.")
 		return
 	end
 
@@ -375,7 +620,7 @@ local function identifySelectedPhotos()
 				)
 
 				local photoSuccess, photoError = LrTasks.pcall(function()
-					shouldContinue = sendIdentifyRequest(photoExport.exportedPhotoPath, photoExport.originalPhotoPath)
+					shouldContinue = sendIdentifyRequest(photoExport.exportedPhotoPath, photoExport.originalPhotoPath, reviewOptions)
 				end)
 
 				if not photoSuccess then
