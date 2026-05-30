@@ -3,12 +3,14 @@ import sys
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src")))
 
+import server
 from server import (
     build_response,
     build_local_species,
     enrich_predictions_with_taxonomy,
     filter_predictions_to_taxonomy,
     flatten_predictions,
+    get_identifier,
     match_prediction_and_location_data,
     resolve_location_fallback,
 )
@@ -134,6 +136,29 @@ def test_resolve_location_fallback_returns_none_when_no_region(monkeypatch):
     monkeypatch.delenv("DEFAULT_EBIRD_REGION", raising=False)
 
     assert resolve_location_fallback(None) is None
+
+
+def test_get_identifier_reuses_model_for_same_configuration(monkeypatch):
+    created_identifiers = []
+
+    class FakeBirdIdentifier:
+        def __init__(self, model_name=None, device=None):
+            self.model_name = model_name
+            self.device = device
+            created_identifiers.append(self)
+
+    server._IDENTIFIER_CACHE.clear()
+    monkeypatch.setattr(server, "BirdIdentifier", FakeBirdIdentifier)
+
+    first = get_identifier(model_name="test-model", device="cpu")
+    second = get_identifier(model_name="test-model", device="cpu")
+    third = get_identifier(model_name="test-model", device="other-device")
+
+    assert first is second
+    assert third is not first
+    assert len(created_identifiers) == 2
+    assert first.model_name == "test-model"
+    assert first.device == "cpu"
 
 
 def test_build_local_species_returns_sorted_unique_species():

@@ -186,6 +186,7 @@ class TestServerIntegration:
 
         monkeypatch.setattr(server, "BirdIdentifier", FakeBirdIdentifier)
         monkeypatch.setattr(server, "EBirdClient", FakeEBirdClient)
+        server._IDENTIFIER_CACHE.clear()
         monkeypatch.setattr(server, "display_image_from_file", lambda file_path: None)
         monkeypatch.setattr(server.TerminalImage, "display", lambda image: None)
         monkeypatch.setattr(server, "get_cr3_metadata", lambda file_path: {})

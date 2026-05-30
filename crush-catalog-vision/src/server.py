@@ -18,10 +18,26 @@ DEFAULT_DEVICE_ENV = "COMPUTE_DEVICE"
 DEFAULT_EBIRD_TOKEN_ENV = "EBIRD_TOKEN"
 DEFAULT_EBIRD_REGION_ENV = "DEFAULT_EBIRD_REGION"
 
+_IDENTIFIER_CACHE = {}
+
 SCIENTIFIC_NAME_ALIASES = {
     "phalacrocorax auritus": "nannopterum auritum",
     "phalacrocorax brasilianus": "nannopterum brasilianum",
 }
+
+
+def get_identifier(model_name: str | None = None, device: str | None = None):
+    resolved_model_name = model_name or os.getenv(DEFAULT_MODEL_ENV)
+    resolved_device = device or os.getenv(DEFAULT_DEVICE_ENV, "cpu")
+    cache_key = (resolved_model_name, resolved_device)
+
+    if cache_key not in _IDENTIFIER_CACHE:
+        _IDENTIFIER_CACHE[cache_key] = BirdIdentifier(
+            model_name=resolved_model_name,
+            device=resolved_device,
+        )
+
+    return _IDENTIFIER_CACHE[cache_key]
 
 
 def _find_taxonomy_match(species, species_by_scientific_name):
@@ -178,7 +194,7 @@ def identify_photo(file_path: str, ebird_token: str, model_name: str | None = No
 
     display_image_from_file(file_path)
 
-    identifier = BirdIdentifier(model_name=model_name or os.getenv(DEFAULT_MODEL_ENV), device=device or os.getenv(DEFAULT_DEVICE_ENV, "cpu"))
+    identifier = get_identifier(model_name=model_name, device=device)
     ebird = EBirdClient(ebird_token or os.getenv(DEFAULT_EBIRD_TOKEN_ENV))
 
     detections = identifier.predict_from_file(file_path, top_k=20)
