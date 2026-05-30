@@ -1,0 +1,68 @@
+return {
+    metadataFieldsForPhotos = {
+        {
+            id = "birdDetectionCount",
+            title = "Detections",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "birdCommonNames",
+            title = "Common",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "birdScientificNames",
+            title = "Scientific",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "birdSuggestedCount",
+            title = "Suggested",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "birdLocalSpeciesCount",
+            title = "Local",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "birdManualCount",
+            title = "Manual",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "birdNotBirdCount",
+            title = "Not Bird",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "birdUnsureCount",
+            title = "Unsure",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "topSuggestionConfidence",
+            title = "Top Conf %",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+    },
+    schemaVersion = 1,
+}

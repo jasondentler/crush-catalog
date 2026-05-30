@@ -21,6 +21,58 @@ local function validateBird(bird)
     assert(bird.confidence >= 0 and bird.confidence <= 100, "Invalid confidence value")
 end
 
+local function numberOrZero(value)
+    return tonumber(value) or 0
+end
+
+local function joinedUniqueBirdNames(birds, fieldName)
+    local names = {}
+    local seen = {}
+
+    for _, bird in ipairs(birds or {}) do
+        local name = tostring(bird[fieldName] or ""):match("^%s*(.-)%s*$") or ""
+        if name ~= "" and not seen[name] then
+            table.insert(names, name)
+            seen[name] = true
+        end
+    end
+
+    return table.concat(names, ", ")
+end
+
+local function writeReviewStats(photo, birds, reviewStats)
+    if not reviewStats then
+        return
+    end
+
+    local fields = {
+        birdDetectionCount = numberOrZero(reviewStats.detectedCount),
+        birdCommonNames = joinedUniqueBirdNames(birds, "commonName"),
+        birdScientificNames = joinedUniqueBirdNames(birds, "scientificName"),
+        birdSuggestedCount = numberOrZero(reviewStats.suggestedCount),
+        birdLocalSpeciesCount = numberOrZero(reviewStats.localSpeciesCount),
+        birdManualCount = numberOrZero(reviewStats.manualCount),
+        birdNotBirdCount = numberOrZero(reviewStats.notBirdCount),
+        birdUnsureCount = numberOrZero(reviewStats.unsureCount),
+        topSuggestionConfidence = string.format("%.1f", numberOrZero(reviewStats.topSuggestionConfidence)),
+    }
+
+    for fieldId, value in pairs(fields) do
+        photo:setPropertyForPlugin(_PLUGIN, fieldId, tostring(value))
+    end
+
+    outputToLog(string.format(
+        "Wrote review stats detections=%d suggested=%d local=%d manual=%d notBird=%d unsure=%d topConfidence=%s",
+        fields.birdDetectionCount,
+        fields.birdSuggestedCount,
+        fields.birdLocalSpeciesCount,
+        fields.birdManualCount,
+        fields.birdNotBirdCount,
+        fields.birdUnsureCount,
+        fields.topSuggestionConfidence
+    ))
+end
+
 local function photoHasKeyword(photo, targetKeyword)
     local keywords = photo:getRawMetadata("keywords") or {}
     for _, kw in ipairs(keywords) do
@@ -118,11 +170,11 @@ local function addSpeciesKeywords(photo, bird)
     addKeywordIfMissing(photo, bird.scientificName, { bird.commonName }, birdsKeyword)
 end
 
-function MetadataHelpers.writeBirds(birds, photoPath)
-    outputToLog("Writing birds to metadata for photo: " .. photoPath)
+function MetadataHelpers.writeBirdReview(birds, photoPath, reviewStats)
+    outputToLog("Writing bird review metadata for photo: " .. photoPath)
     LrTasks.startAsyncTask(function()
-        outputToLog("Started async task to write birds to metadata")
-        catalog:withWriteAccessDo("Add Bird Tags", function()
+        outputToLog("Started async task to write bird review metadata")
+        catalog:withWriteAccessDo("Add Bird Review Metadata", function()
             outputToLog("Acquired write access to catalog")
             local photo = catalog:findPhotoByPath(photoPath)
             if not photo then
@@ -141,8 +193,14 @@ function MetadataHelpers.writeBirds(birds, photoPath)
 
                 addSpeciesKeywords(photo, bird)
             end
+
+            writeReviewStats(photo, birds, reviewStats)
         end)
     end)
+end
+
+function MetadataHelpers.writeBirds(birds, photoPath)
+    MetadataHelpers.writeBirdReview(birds, photoPath, nil)
 end
 
 return MetadataHelpers

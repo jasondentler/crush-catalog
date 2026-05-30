@@ -120,8 +120,8 @@ local function askForLocationFallback(photoPath)
 	return fallbackRegion
 end
 
-local function writeConfirmedBirds(birds, originalPhotoPath)
-	if #birds == 0 then
+local function writeBirdReview(birds, originalPhotoPath, reviewStats)
+	if #birds == 0 and not reviewStats then
 		outputToLog("No confirmed birds to write for originalPhotoPath=" .. tostring(originalPhotoPath))
 		return
 	end
@@ -131,8 +131,57 @@ local function writeConfirmedBirds(birds, originalPhotoPath)
 		return
 	end
 
-	outputToLog(string.format("Writing %d confirmed birds to originalPhotoPath=%s", #birds, tostring(originalPhotoPath)))
-	MetadataHelpers.writeBirds(birds, originalPhotoPath)
+	outputToLog(string.format("Writing %d confirmed birds and review stats to originalPhotoPath=%s", #birds, tostring(originalPhotoPath)))
+	MetadataHelpers.writeBirdReview(birds, originalPhotoPath, reviewStats)
+end
+
+local function getDetectionCount(response)
+	local count = 0
+	for _, _ in ipairs(response.detections or {}) do
+		count = count + 1
+	end
+	return count
+end
+
+local function newReviewStats(response)
+	return {
+		detectedCount = getDetectionCount(response),
+		suggestedCount = 0,
+		localSpeciesCount = 0,
+		manualCount = 0,
+		notBirdCount = 0,
+		unsureCount = 0,
+		topSuggestionConfidence = 0,
+	}
+end
+
+local function updateTopSuggestionConfidence(reviewStats, detection)
+	local confidence = tonumber(detection and detection.best_match and detection.best_match.confidence)
+	if confidence and confidence * 100 > reviewStats.topSuggestionConfidence then
+		reviewStats.topSuggestionConfidence = confidence * 100
+	end
+end
+
+local function countConfirmation(reviewStats, confirmation)
+	if not confirmation then
+		return
+	end
+
+	if confirmation.status == "confirmed" then
+		if confirmation.selectionSource == "local_species" then
+			reviewStats.localSpeciesCount = reviewStats.localSpeciesCount + 1
+		elseif confirmation.selectionSource == "manual" then
+			reviewStats.manualCount = reviewStats.manualCount + 1
+		else
+			reviewStats.suggestedCount = reviewStats.suggestedCount + 1
+		end
+	elseif confirmation.status == "rejected" then
+		if confirmation.reason == "not_a_bird" then
+			reviewStats.notBirdCount = reviewStats.notBirdCount + 1
+		elseif confirmation.reason == "unsure" then
+			reviewStats.unsureCount = reviewStats.unsureCount + 1
+		end
+	end
 end
 
 local function showResponse(exportedPhotoPath, originalPhotoPath, response)
@@ -142,12 +191,16 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response)
 	end
 
 	if response.error and (not response.detections or #response.detections == 0) then
+		writeBirdReview({}, originalPhotoPath, newReviewStats(response))
 		LrDialogs.message("Bird ID Error", response.error)
 		return true
 	end
 
 	local birds = {}
+	local reviewStats = newReviewStats(response)
 	for detectionIndex, detection in ipairs(response.detections or {}) do
+		updateTopSuggestionConfidence(reviewStats, detection)
+
 		outputToLog(string.format(
 			"Reviewing detection index=%d originalPhotoPath=%s exportedPhotoPath=%s bestMatch=%s box=%s",
 			detectionIndex,
@@ -157,6 +210,7 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response)
 			tostring(detection.box and table.concat(detection.box, ","))
 		))
 		local confirmation = ConfirmDetection.confirm(exportedPhotoPath, detection, originalPhotoPath, response.local_species)
+		countConfirmation(reviewStats, confirmation)
 
 		if confirmation and confirmation.status == "confirmed" then
 			outputToLog(string.format(
@@ -174,7 +228,7 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response)
 			})
 		elseif confirmation and confirmation.status == "stopped" then
 			outputToLog("Stopping review at originalPhotoPath=" .. tostring(originalPhotoPath))
-			writeConfirmedBirds(birds, originalPhotoPath)
+			writeBirdReview(birds, originalPhotoPath, reviewStats)
 			return false
 		else
 			outputToLog(string.format(
@@ -187,7 +241,7 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response)
 		end
 	end
 
-	writeConfirmedBirds(birds, originalPhotoPath)
+	writeBirdReview(birds, originalPhotoPath, reviewStats)
 	return true
 end
 

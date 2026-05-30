@@ -328,6 +328,7 @@ function ConfirmDetection.showBirdConfirmationDialog(croppedImagePath, detection
                     commonName = commonName,
                     scientificName = sciName,
                     confidence = (match.confidence or 0) * 100,
+                    selectionSource = "suggested",
                 }
             end
         end

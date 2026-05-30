@@ -6,6 +6,7 @@ return {
 
     -- Plug-in Manager panel
     LrPluginInfoProvider = "InfoProvider.lua",
+    LrMetadataProvider = "MetadataProvider.lua",
     LrLibraryMenuItems = {{
         title = LOC "$$$/CrushCatalog/BirdIdentify=Identify Bird",
         file = "BirdIdentifyAction.lua"
