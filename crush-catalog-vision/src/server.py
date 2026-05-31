@@ -23,6 +23,7 @@ _IDENTIFIER_CACHE = {}
 SCIENTIFIC_NAME_ALIASES = {
     "phalacrocorax auritus": "nannopterum auritum",
     "phalacrocorax brasilianus": "nannopterum brasilianum",
+    "bubulcus ibis": "ardea ibis" # Cattle Egret --> Western Cattle Egret
 }
 
 
