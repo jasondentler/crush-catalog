@@ -104,17 +104,67 @@ local function isProgressCanceled(progressScope)
 	return success and canceled == true
 end
 
-local function setProgressCancelable(progressScope, cancelable)
+local function isProgressPaused(progressScope)
+	if not progressScope then
+		return false
+	end
+
+	local success, paused = LrTasks.pcall(function()
+		return progressScope:isPaused()
+	end)
+
+	return success and paused == true
+end
+
+local function setProgressCaption(progressScope, caption)
+	if not progressScope then
+		return
+	end
+
+	LrTasks.pcall(function()
+		progressScope:setCaption(caption)
+	end)
+end
+
+local function waitIfProgressPaused(progressScope, caption)
+	if not isProgressPaused(progressScope) then
+		return not isProgressCanceled(progressScope)
+	end
+
+	outputToLog("Progress scope paused")
+	setProgressCaption(progressScope, caption or "Paused identifying birds.")
+
+	while isProgressPaused(progressScope) do
+		if isProgressCanceled(progressScope) then
+			outputToLog("Progress scope canceled while paused")
+			return false
+		end
+
+		LrTasks.sleep(0.2)
+	end
+
+	outputToLog("Progress scope resumed")
+	return not isProgressCanceled(progressScope)
+end
+
+local function setProgressControls(progressScope, pausable, cancelable)
 	if not progressScope then
 		return
 	end
 
 	local success, err = LrTasks.pcall(function()
-		progressScope:setCancelable(cancelable)
+		progressScope:setPausable(pausable, cancelable)
 	end)
 
 	if not success then
-		outputToLog("Unable to set progress cancelable state: " .. tostring(err))
+		outputToLog("Unable to set progress pausable state: " .. tostring(err))
+		success, err = LrTasks.pcall(function()
+			progressScope:setCancelable(cancelable)
+		end)
+
+		if not success then
+			outputToLog("Unable to set progress cancelable state: " .. tostring(err))
+		end
 	end
 end
 
@@ -456,6 +506,12 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response, revi
 	local birds = {}
 	local reviewStats = newReviewStats(response)
 	for detectionIndex, detection in ipairs(response.detections or {}) do
+		if not waitIfProgressPaused(progressScope, "Paused reviewing birds.") then
+			outputToLog("Progress scope canceled while paused during review at originalPhotoPath=" .. tostring(originalPhotoPath))
+			writeBirdReview(birds, originalPhotoPath, reviewStats)
+			return false
+		end
+
 		if isProgressCanceled(progressScope) then
 			outputToLog("Progress scope canceled during review at originalPhotoPath=" .. tostring(originalPhotoPath))
 			writeBirdReview(birds, originalPhotoPath, reviewStats)
@@ -473,9 +529,18 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response, revi
 			tostring(detection.box and table.concat(detection.box, ","))
 		))
 		local confirmation = autoReviewDetection(detection, reviewOptions)
-		if not confirmation then
+		while not confirmation or confirmation.status == "paused" do
+			if confirmation and confirmation.status == "paused" then
+				if not waitIfProgressPaused(progressScope, "Paused reviewing birds.") then
+					outputToLog("Progress scope canceled while paused during detection review at originalPhotoPath=" .. tostring(originalPhotoPath))
+					writeBirdReview(birds, originalPhotoPath, reviewStats)
+					return false
+				end
+			end
+
 			confirmation = ConfirmDetection.confirm(exportedPhotoPath, detection, originalPhotoPath, response.local_species, progressScope)
 		end
+
 		countConfirmation(reviewStats, confirmation)
 
 		if confirmation and confirmation.status == "confirmed" then
@@ -562,6 +627,11 @@ local function sendIdentifyRequest(exportedPhotoPath, originalPhotoPath, reviewO
 
 	local payload = LuaHelpers.build_identify_payload(exportedPhotoPath, ebirdToken, nil)
 
+	if not waitIfProgressPaused(progressScope, "Paused before identifying birds.") then
+		outputToLog("Progress scope canceled while paused before backend request originalPhotoPath=" .. tostring(originalPhotoPath))
+		return false
+	end
+
 	if isProgressCanceled(progressScope) then
 		outputToLog("Progress scope canceled before backend request originalPhotoPath=" .. tostring(originalPhotoPath))
 		return false
@@ -571,6 +641,11 @@ local function sendIdentifyRequest(exportedPhotoPath, originalPhotoPath, reviewO
 	if err then
 		LrDialogs.message("Connection Failed", "Could not connect to the backend: " .. err)
 		return true
+	end
+
+	if not waitIfProgressPaused(progressScope, "Paused after identifying birds.") then
+		outputToLog("Progress scope canceled while paused after backend request originalPhotoPath=" .. tostring(originalPhotoPath))
+		return false
 	end
 
 	if isProgressCanceled(progressScope) then
@@ -593,6 +668,11 @@ local function sendIdentifyRequest(exportedPhotoPath, originalPhotoPath, reviewO
 		if err then
 			LrDialogs.message("Connection Failed", "Could not connect to the backend: " .. err)
 			return true
+		end
+
+		if not waitIfProgressPaused(progressScope, "Paused after identifying birds.") then
+			outputToLog("Progress scope canceled while paused after location fallback request originalPhotoPath=" .. tostring(originalPhotoPath))
+			return false
 		end
 
 		if isProgressCanceled(progressScope) then
@@ -632,13 +712,19 @@ local function identifySelectedPhotos()
 		title = "Identify Birds",
 	})
 
-	setProgressCancelable(progressScope, true)
+	setProgressControls(progressScope, true, true)
 
 	local completedPhotos = 0
 	local stopped = false
 
 	local success, error = LrTasks.pcall(function()
 		for batchStart = 1, photoCount, EXPORT_BATCH_SIZE do
+			if not waitIfProgressPaused(progressScope, "Paused identifying birds.") then
+				stopped = true
+				setProgress(progressScope, completedPhotos, photoCount, "Stopping identification...")
+				return
+			end
+
 			if isProgressCanceled(progressScope) then
 				stopped = true
 				setProgress(progressScope, completedPhotos, photoCount, "Stopping identification...")
@@ -660,6 +746,13 @@ local function identifySelectedPhotos()
 				outputToLog(string.format("No photos were exported for batchStart=%d batchEnd=%d", batchStart, batchEnd))
 			end
 
+			if not waitIfProgressPaused(progressScope, "Paused identifying birds.") then
+				stopped = true
+				cleanupPhotoExports(photoExports)
+				setProgress(progressScope, completedPhotos, photoCount, "Stopped identifying birds.")
+				return
+			end
+
 			if isProgressCanceled(progressScope) then
 				stopped = true
 				cleanupPhotoExports(photoExports)
@@ -672,6 +765,13 @@ local function identifySelectedPhotos()
 				local photoNumber = batchStart + batchIndex - 1
 				local photoName = leafName(photoExport.originalPhotoPath)
 				local shouldContinue = true
+
+				if not waitIfProgressPaused(progressScope, "Paused identifying birds.") then
+					stopped = true
+					cleanupPhotoExports(photoExports)
+					setProgress(progressScope, completedPhotos, photoCount, "Stopped identifying birds.")
+					return
+				end
 
 				if isProgressCanceled(progressScope) then
 					stopped = true

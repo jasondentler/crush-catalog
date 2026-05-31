@@ -58,7 +58,19 @@ local function isProgressCanceled(progressScope)
     return success and canceled == true
 end
 
-local function dismissDialogWhenProgressCanceled(progressScope, dialogView, result)
+local function isProgressPaused(progressScope)
+    if not progressScope then
+        return false
+    end
+
+    local success, paused = LrTasks.pcall(function()
+        return progressScope:isPaused()
+    end)
+
+    return success and paused == true
+end
+
+local function dismissDialogWhenProgressStops(progressScope, dialogView)
     if not progressScope then
         return function()
         end
@@ -71,7 +83,15 @@ local function dismissDialogWhenProgressCanceled(progressScope, dialogView, resu
             if isProgressCanceled(progressScope) then
                 outputToLog("Progress scope canceled; dismissing active confirmation dialog")
                 LrTasks.pcall(function()
-                    LrDialogs.stopModalWithResult(dialogView, result or "progressCanceled")
+                    LrDialogs.stopModalWithResult(dialogView, "progressCanceled")
+                end)
+                return
+            end
+
+            if isProgressPaused(progressScope) then
+                outputToLog("Progress scope paused; dismissing active confirmation dialog")
+                LrTasks.pcall(function()
+                    LrDialogs.stopModalWithResult(dialogView, "progressPaused")
                 end)
                 return
             end
@@ -189,7 +209,7 @@ function ConfirmDetection.showDifferentSpeciesDialog(localSpecies, photoName, pr
             },
         }
 
-        local stopWatching = dismissDialogWhenProgressCanceled(progressScope, contents, "progressCanceled")
+        local stopWatching = dismissDialogWhenProgressStops(progressScope, contents)
         local dialogResult = LrDialogs.presentModalDialog({
             title = "Choose Bird Species - " .. tostring(photoName),
             contents = contents,
@@ -210,6 +230,10 @@ function ConfirmDetection.showDifferentSpeciesDialog(localSpecies, photoName, pr
 
     if result.result == "progressCanceled" then
         return { status = "stopped" }
+    end
+
+    if result.result == "progressPaused" then
+        return { status = "paused" }
     end
 
     if result.result ~= "ok" then
@@ -339,7 +363,7 @@ function ConfirmDetection.showBirdConfirmationDialog(croppedImagePath, detection
             },
         }
 
-        local stopWatching = dismissDialogWhenProgressCanceled(progressScope, contents, "progressCanceled")
+        local stopWatching = dismissDialogWhenProgressStops(progressScope, contents)
         local dialogResult = LrDialogs.presentModalDialog({
             title = "Confirm Bird Species - " .. photoName,
             contents = contents,
@@ -391,6 +415,9 @@ function ConfirmDetection.showBirdConfirmationDialog(croppedImagePath, detection
     elseif result.result == "unsure" then
         outputToLog("Rejected detection reason=unsure photoName=" .. tostring(photoName))
         return { status = "rejected", reason = "unsure" }
+    elseif result.result == "progressPaused" then
+        outputToLog("Paused detection review photoName=" .. tostring(photoName))
+        return { status = "paused" }
     else
         outputToLog("Stopped detection review photoName=" .. tostring(photoName))
         return { status = "stopped" }
