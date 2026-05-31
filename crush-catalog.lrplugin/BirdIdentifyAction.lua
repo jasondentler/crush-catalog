@@ -92,6 +92,32 @@ local function setProgress(progressScope, completed, total, caption)
 	progressScope:setPortionComplete(completed, total)
 end
 
+local function isProgressCanceled(progressScope)
+	if not progressScope then
+		return false
+	end
+
+	local success, canceled = LrTasks.pcall(function()
+		return progressScope:isCanceled()
+	end)
+
+	return success and canceled == true
+end
+
+local function setProgressCancelable(progressScope, cancelable)
+	if not progressScope then
+		return
+	end
+
+	local success, err = LrTasks.pcall(function()
+		progressScope:setCancelable(cancelable)
+	end)
+
+	if not success then
+		outputToLog("Unable to set progress cancelable state: " .. tostring(err))
+	end
+end
+
 local function leafName(path)
 	if not path or path == "" then
 		return "photo"
@@ -415,7 +441,7 @@ local function countConfirmation(reviewStats, confirmation)
 	end
 end
 
-local function showResponse(exportedPhotoPath, originalPhotoPath, response, reviewOptions)
+local function showResponse(exportedPhotoPath, originalPhotoPath, response, reviewOptions, progressScope)
 	if not response then
 		LrDialogs.message("Bird ID Error", "The backend returned an empty response.")
 		return true
@@ -430,6 +456,12 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response, revi
 	local birds = {}
 	local reviewStats = newReviewStats(response)
 	for detectionIndex, detection in ipairs(response.detections or {}) do
+		if isProgressCanceled(progressScope) then
+			outputToLog("Progress scope canceled during review at originalPhotoPath=" .. tostring(originalPhotoPath))
+			writeBirdReview(birds, originalPhotoPath, reviewStats)
+			return false
+		end
+
 		updateTopSuggestionConfidence(reviewStats, detection)
 
 		outputToLog(string.format(
@@ -442,7 +474,7 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response, revi
 		))
 		local confirmation = autoReviewDetection(detection, reviewOptions)
 		if not confirmation then
-			confirmation = ConfirmDetection.confirm(exportedPhotoPath, detection, originalPhotoPath, response.local_species)
+			confirmation = ConfirmDetection.confirm(exportedPhotoPath, detection, originalPhotoPath, response.local_species, progressScope)
 		end
 		countConfirmation(reviewStats, confirmation)
 
@@ -516,7 +548,7 @@ local function postPayload(payload)
 	return decoded, nil
 end
 
-local function sendIdentifyRequest(exportedPhotoPath, originalPhotoPath, reviewOptions)
+local function sendIdentifyRequest(exportedPhotoPath, originalPhotoPath, reviewOptions, progressScope)
 	outputToLog(string.format("Sending identify request originalPhotoPath=%s exportedPhotoPath=%s", tostring(originalPhotoPath), tostring(exportedPhotoPath)))
 	local ebirdToken = tostring(getPrefs().ebirdApiKey or "")
 
@@ -530,10 +562,20 @@ local function sendIdentifyRequest(exportedPhotoPath, originalPhotoPath, reviewO
 
 	local payload = LuaHelpers.build_identify_payload(exportedPhotoPath, ebirdToken, nil)
 
+	if isProgressCanceled(progressScope) then
+		outputToLog("Progress scope canceled before backend request originalPhotoPath=" .. tostring(originalPhotoPath))
+		return false
+	end
+
 	local response, err = postPayload(payload)
 	if err then
 		LrDialogs.message("Connection Failed", "Could not connect to the backend: " .. err)
 		return true
+	end
+
+	if isProgressCanceled(progressScope) then
+		outputToLog("Progress scope canceled after backend request originalPhotoPath=" .. tostring(originalPhotoPath))
+		return false
 	end
 
 	if response and response.error and response.error:match("[Ll]ocation") then
@@ -552,9 +594,14 @@ local function sendIdentifyRequest(exportedPhotoPath, originalPhotoPath, reviewO
 			LrDialogs.message("Connection Failed", "Could not connect to the backend: " .. err)
 			return true
 		end
+
+		if isProgressCanceled(progressScope) then
+			outputToLog("Progress scope canceled after location fallback request originalPhotoPath=" .. tostring(originalPhotoPath))
+			return false
+		end
 	end
 
-	return showResponse(exportedPhotoPath, originalPhotoPath, response, reviewOptions)
+	return showResponse(exportedPhotoPath, originalPhotoPath, response, reviewOptions, progressScope)
 end
 
 local function identifySelectedPhotos()
@@ -585,15 +632,19 @@ local function identifySelectedPhotos()
 		title = "Identify Birds",
 	})
 
-	if progressScope.setCancelable then
-		progressScope:setCancelable(false)
-	end
+	setProgressCancelable(progressScope, true)
 
 	local completedPhotos = 0
 	local stopped = false
 
 	local success, error = LrTasks.pcall(function()
 		for batchStart = 1, photoCount, EXPORT_BATCH_SIZE do
+			if isProgressCanceled(progressScope) then
+				stopped = true
+				setProgress(progressScope, completedPhotos, photoCount, "Stopping identification...")
+				return
+			end
+
 			local photoBatch, batchEnd = getPhotoBatch(photos, batchStart, EXPORT_BATCH_SIZE)
 
 			setProgress(
@@ -609,11 +660,25 @@ local function identifySelectedPhotos()
 				outputToLog(string.format("No photos were exported for batchStart=%d batchEnd=%d", batchStart, batchEnd))
 			end
 
+			if isProgressCanceled(progressScope) then
+				stopped = true
+				cleanupPhotoExports(photoExports)
+				setProgress(progressScope, completedPhotos, photoCount, "Stopped identifying birds.")
+				return
+			end
+
 			for batchIndex = 1, #photoExports do
 				local photoExport = photoExports[batchIndex]
 				local photoNumber = batchStart + batchIndex - 1
 				local photoName = leafName(photoExport.originalPhotoPath)
 				local shouldContinue = true
+
+				if isProgressCanceled(progressScope) then
+					stopped = true
+					cleanupPhotoExports(photoExports)
+					setProgress(progressScope, completedPhotos, photoCount, "Stopped identifying birds.")
+					return
+				end
 
 				setProgress(
 					progressScope,
@@ -623,7 +688,7 @@ local function identifySelectedPhotos()
 				)
 
 				local photoSuccess, photoError = LrTasks.pcall(function()
-					shouldContinue = sendIdentifyRequest(photoExport.exportedPhotoPath, photoExport.originalPhotoPath, reviewOptions)
+					shouldContinue = sendIdentifyRequest(photoExport.exportedPhotoPath, photoExport.originalPhotoPath, reviewOptions, progressScope)
 				end)
 
 				if not photoSuccess then

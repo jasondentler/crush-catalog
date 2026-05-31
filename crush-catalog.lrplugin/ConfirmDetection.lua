@@ -6,6 +6,7 @@ local LrFunctionContext = import 'LrFunctionContext'
 local LrFileUtils = import 'LrFileUtils'
 local LrLogger = import 'LrLogger'
 local LrPathUtils = import 'LrPathUtils'
+local LrTasks = import 'LrTasks'
 local JSON = require("JSON")
 local ImageHelpers = require("ImageHelpers")
 
@@ -45,7 +46,46 @@ local function speciesToDropDownItem(species)
     }
 end
 
-function ConfirmDetection.confirm(entirePhotoPath, detection, displayPhotoPath, localSpecies)
+local function isProgressCanceled(progressScope)
+    if not progressScope then
+        return false
+    end
+
+    local success, canceled = LrTasks.pcall(function()
+        return progressScope:isCanceled()
+    end)
+
+    return success and canceled == true
+end
+
+local function dismissDialogWhenProgressCanceled(progressScope, dialogView, result)
+    if not progressScope then
+        return function()
+        end
+    end
+
+    local watching = true
+
+    LrTasks.startAsyncTask(function()
+        while watching do
+            if isProgressCanceled(progressScope) then
+                outputToLog("Progress scope canceled; dismissing active confirmation dialog")
+                LrTasks.pcall(function()
+                    LrDialogs.stopModalWithResult(dialogView, result or "progressCanceled")
+                end)
+                return
+            end
+
+            LrTasks.sleep(0.2)
+        end
+    end)
+
+    return function()
+        watching = false
+    end
+end
+
+function ConfirmDetection.confirm(entirePhotoPath, detection, displayPhotoPath, localSpecies, progressScope)
     outputToLog(string.format(
         "Cropping detection for displayPhotoPath=%s exportedPhotoPath=%s box=%s imageWidth=%s imageHeight=%s",
         tostring(displayPhotoPath),
@@ -55,10 +95,10 @@ function ConfirmDetection.confirm(entirePhotoPath, detection, displayPhotoPath, 
         tostring(detection and detection.image_height)
     ))
     local croppedImagePath = ImageHelpers.crop(entirePhotoPath, detection.box, detection.image_width, detection.image_height)
-    return ConfirmDetection.showBirdConfirmationDialog(croppedImagePath, detection, displayPhotoPath, localSpecies)
+    return ConfirmDetection.showBirdConfirmationDialog(croppedImagePath, detection, displayPhotoPath, localSpecies, progressScope)
 end
 
-function ConfirmDetection.showDifferentSpeciesDialog(localSpecies, photoName)
+function ConfirmDetection.showDifferentSpeciesDialog(localSpecies, photoName, progressScope)
     local speciesItems = {}
     local speciesByValue = {}
 
@@ -149,6 +189,7 @@ function ConfirmDetection.showDifferentSpeciesDialog(localSpecies, photoName)
             },
         }
 
+        local stopWatching = dismissDialogWhenProgressCanceled(progressScope, contents, "progressCanceled")
         local dialogResult = LrDialogs.presentModalDialog({
             title = "Choose Bird Species - " .. tostring(photoName),
             contents = contents,
@@ -156,6 +197,7 @@ function ConfirmDetection.showDifferentSpeciesDialog(localSpecies, photoName)
             actionVerb = "Use Species",
             cancelVerb = "Back",
         })
+        stopWatching()
 
         return {
             result = dialogResult,
@@ -166,6 +208,10 @@ function ConfirmDetection.showDifferentSpeciesDialog(localSpecies, photoName)
         }
     end)
 
+    if result.result == "progressCanceled" then
+        return { status = "stopped" }
+    end
+
     if result.result ~= "ok" then
         return { status = "rejected", reason = "different_species_cancelled" }
     end
@@ -173,7 +219,7 @@ function ConfirmDetection.showDifferentSpeciesDialog(localSpecies, photoName)
     if result.speciesEntryMode == "manual" then
         if result.manualCommonName == "" and result.manualScientificName == "" then
             LrDialogs.message("Species Required", "Enter a common name, a scientific name, or both.")
-            return ConfirmDetection.showDifferentSpeciesDialog(localSpecies, photoName)
+            return ConfirmDetection.showDifferentSpeciesDialog(localSpecies, photoName, progressScope)
         end
 
         return {
@@ -201,7 +247,7 @@ function ConfirmDetection.showDifferentSpeciesDialog(localSpecies, photoName)
     return { status = "rejected", reason = "different_species_not_found" }
 end
 
-function ConfirmDetection.showBirdConfirmationDialog(croppedImagePath, detection, displayPhotoPath, localSpecies)
+function ConfirmDetection.showBirdConfirmationDialog(croppedImagePath, detection, displayPhotoPath, localSpecies, progressScope)
     if not croppedImagePath then
         LrDialogs.message("Error", "Failed to get cropped JPEG file path")
         return { status = "cancelled" }
@@ -293,6 +339,7 @@ function ConfirmDetection.showBirdConfirmationDialog(croppedImagePath, detection
             },
         }
 
+        local stopWatching = dismissDialogWhenProgressCanceled(progressScope, contents, "progressCanceled")
         local dialogResult = LrDialogs.presentModalDialog({
             title = "Confirm Bird Species - " .. photoName,
             contents = contents,
@@ -300,6 +347,7 @@ function ConfirmDetection.showBirdConfirmationDialog(croppedImagePath, detection
             actionVerb = "Confirm",
             cancelVerb = "Stop"
         })
+        stopWatching()
 
         return {
             result = dialogResult,
@@ -339,7 +387,7 @@ function ConfirmDetection.showBirdConfirmationDialog(croppedImagePath, detection
         return { status = "rejected", reason = "not_a_bird" }
     elseif result.result == "differentSpecies" then
         outputToLog("Rejected detection reason=different_species photoName=" .. tostring(photoName))
-        return ConfirmDetection.showDifferentSpeciesDialog(localSpecies, photoName)
+        return ConfirmDetection.showDifferentSpeciesDialog(localSpecies, photoName, progressScope)
     elseif result.result == "unsure" then
         outputToLog("Rejected detection reason=unsure photoName=" .. tostring(photoName))
         return { status = "rejected", reason = "unsure" }
