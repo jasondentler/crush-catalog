@@ -204,18 +204,26 @@ local function numberFromPluginProperty(photo, fieldId)
 	return tonumber(value) or 0
 end
 
-local function isIdentificationComplete(photo)
-	local detections = numberFromPluginProperty(photo, "birdDetectionCount")
-	if detections <= 0 then
-		return false
-	end
-
+local function reviewedDetectionCount(photo, includeUnsure)
 	local reviewed = numberFromPluginProperty(photo, "birdSuggestedCount")
 		+ numberFromPluginProperty(photo, "birdLocalSpeciesCount")
 		+ numberFromPluginProperty(photo, "birdManualCount")
 		+ numberFromPluginProperty(photo, "birdNotBirdCount")
 
-	return reviewed >= detections
+	if includeUnsure then
+		reviewed = reviewed + numberFromPluginProperty(photo, "birdUnsureCount")
+	end
+
+	return reviewed
+end
+
+local function isIdentificationComplete(photo, includeUnsure)
+	local detections = numberFromPluginProperty(photo, "birdDetectionCount")
+	if detections <= 0 then
+		return false
+	end
+
+	return reviewedDetectionCount(photo, includeUnsure) >= detections
 end
 
 local function filterPhotosForReview(photos, reviewOptions)
@@ -225,16 +233,25 @@ local function filterPhotosForReview(photos, reviewOptions)
 
 	local filtered = {}
 	local skipped = 0
+	local includeUnsure = reviewOptions.skipUnsure == true
 	for _, photo in ipairs(photos) do
-		if isIdentificationComplete(photo) then
+		if isIdentificationComplete(photo, includeUnsure) then
 			skipped = skipped + 1
-			outputToLog("Skipping completed photo: " .. tostring(photo:getRawMetadata("path")))
+			if includeUnsure then
+				outputToLog("Skipping reviewed photo including unsure detections: " .. tostring(photo:getRawMetadata("path")))
+			else
+				outputToLog("Skipping completed photo: " .. tostring(photo:getRawMetadata("path")))
+			end
 		else
 			table.insert(filtered, photo)
 		end
 	end
 
-	outputToLog(string.format("Skipped %d completed photo(s)", skipped))
+	if includeUnsure then
+		outputToLog(string.format("Skipped %d reviewed photo(s), counting unsure detections", skipped))
+	else
+		outputToLog(string.format("Skipped %d completed photo(s)", skipped))
+	end
 	return filtered
 end
 
@@ -243,8 +260,16 @@ local function showMultiPhotoOptionsDialog(photoCount)
 		local f = LrView.osFactory()
 		local props = LrBinding.makePropertyTable(context)
 		props.skipCompleted = true
+		props.skipUnsure = false
 		props.reviewMode = "prompt_always"
 		props.confidenceThreshold = tostring(getPrefs().autoAcceptConfidenceThreshold or "95")
+
+		local skipUnsureEnabled = LrView.bind {
+			key = "skipCompleted",
+			transform = function(value)
+				return value == true
+			end,
+		}
 
 		local contents = f:column {
 			spacing = 12,
@@ -256,6 +281,16 @@ local function showMultiPhotoOptionsDialog(photoCount)
 			f:checkbox {
 				title = "Skip photos with complete identification metadata",
 				value = LrView.bind("skipCompleted"),
+			},
+			f:row {
+				f:spacer {
+					width = 20,
+				},
+				f:checkbox {
+					title = "Also skip photos where remaining detections are marked unsure",
+					value = LrView.bind("skipUnsure"),
+					enabled = skipUnsureEnabled,
+				},
 			},
 			f:row {
 				f:radio_button {
@@ -328,6 +363,7 @@ local function showMultiPhotoOptionsDialog(photoCount)
 
 		return {
 			skipCompleted = props.skipCompleted == true,
+			skipUnsure = props.skipUnsure == true,
 			reviewMode = props.reviewMode,
 			autoAcceptHighConfidence = props.reviewMode == "prompt_threshold",
 			autoAcceptThreshold = threshold,
@@ -341,6 +377,7 @@ local function getReviewOptions(photoCount)
 	if photoCount <= 1 then
 		return {
 			skipCompleted = false,
+			skipUnsure = false,
 			reviewMode = "prompt_always",
 			autoAcceptHighConfidence = false,
 			autoAcceptThreshold = tonumber(getPrefs().autoAcceptConfidenceThreshold) or 95,
