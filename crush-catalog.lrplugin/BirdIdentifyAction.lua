@@ -545,13 +545,11 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response, revi
 	for detectionIndex, detection in ipairs(response.detections or {}) do
 		if not waitIfProgressPaused(progressScope, "Paused reviewing birds.") then
 			outputToLog("Progress scope canceled while paused during review at originalPhotoPath=" .. tostring(originalPhotoPath))
-			writeBirdReview(birds, originalPhotoPath, reviewStats)
 			return false
 		end
 
 		if isProgressCanceled(progressScope) then
 			outputToLog("Progress scope canceled during review at originalPhotoPath=" .. tostring(originalPhotoPath))
-			writeBirdReview(birds, originalPhotoPath, reviewStats)
 			return false
 		end
 
@@ -570,7 +568,6 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response, revi
 			if confirmation and confirmation.status == "paused" then
 				if not waitIfProgressPaused(progressScope, "Paused reviewing birds.") then
 					outputToLog("Progress scope canceled while paused during detection review at originalPhotoPath=" .. tostring(originalPhotoPath))
-					writeBirdReview(birds, originalPhotoPath, reviewStats)
 					return false
 				end
 			end
@@ -596,7 +593,6 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response, revi
 			})
 		elseif confirmation and confirmation.status == "stopped" then
 			outputToLog("Stopping review at originalPhotoPath=" .. tostring(originalPhotoPath))
-			writeBirdReview(birds, originalPhotoPath, reviewStats)
 			return false
 		else
 			outputToLog(string.format(
