@@ -90,6 +90,70 @@ local function photoHasKeyword(photo, targetKeyword)
     return false
 end
 
+local function getKeywordName(keyword)
+    if not keyword then
+        return nil
+    end
+
+    local success, name = LrTasks.pcall(function()
+        return keyword:getName()
+    end)
+
+    if success then
+        return name
+    end
+
+    outputToLog("Unable to read keyword name: " .. tostring(name))
+    return nil
+end
+
+local function getKeywordParent(keyword)
+    if not keyword then
+        return nil
+    end
+
+    local success, parent = LrTasks.pcall(function()
+        return keyword:getParent()
+    end)
+
+    if success then
+        return parent
+    end
+
+    outputToLog("Unable to read keyword parent: " .. tostring(parent))
+    return nil
+end
+
+local function isCrushCatalogKeyword(keyword)
+    local current = keyword
+    local root = nil
+
+    while current do
+        root = current
+        current = getKeywordParent(current)
+    end
+
+    return getKeywordName(root) == "Crush Catalog"
+end
+
+local function clearCrushCatalogKeywords(photo)
+    local keywords = photo:getRawMetadata("keywords") or {}
+    local keywordsToRemove = {}
+
+    for _, keyword in ipairs(keywords) do
+        if isCrushCatalogKeyword(keyword) then
+            table.insert(keywordsToRemove, keyword)
+        end
+    end
+
+    for _, keyword in ipairs(keywordsToRemove) do
+        outputToLog("Removing previous Crush Catalog keyword: " .. tostring(getKeywordName(keyword)))
+        photo:removeKeyword(keyword)
+    end
+
+    outputToLog(string.format("Removed %d previous Crush Catalog keyword(s)", #keywordsToRemove))
+end
+
 local function createKeyword(keywordName, synonyms, parent)
     if type(synonyms) == "string" then
         synonyms = { synonyms }
@@ -254,6 +318,8 @@ function MetadataHelpers.writeBirdReview(birds, photoPath, reviewStats)
             else
                 outputToLog("Writing bird metadata to photo: " .. photoPath)
             end
+
+            clearCrushCatalogKeywords(photo)
 
             for _, bird in ipairs(birds) do
                 outputToLog("Validating bird")
