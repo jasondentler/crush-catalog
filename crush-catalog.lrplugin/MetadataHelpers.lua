@@ -1,5 +1,6 @@
 local LrTasks = import 'LrTasks'
 local LrLogger = import 'LrLogger'
+local LrDialogs = import("LrDialogs")
 
 local catalog = import "LrApplication".activeCatalog()
 
@@ -10,6 +11,10 @@ local MetadataHelpers = {}
 
 local function outputToLog( message )
 	myLogger:trace( message )
+end
+
+local function alert( message ) 
+    LrDialogs.message("Metadata Alert", message)
 end
 
 outputToLog("MetadataHelpers loaded")
@@ -86,6 +91,10 @@ local function photoHasKeyword(photo, targetKeyword)
 end
 
 local function createKeyword(keywordName, synonyms, parent)
+    if type(synonyms) == "string" then
+        synonyms = { synonyms }
+    end
+
     local keyword = catalog:createKeyword(keywordName, synonyms, true, parent, true)
     if keyword then
         outputToLog("Created or found keyword: " .. keywordName)
@@ -154,22 +163,82 @@ local function addKeywordIfMissing(photo, keywordName, synonyms, parent)
     addKeywordObjectIfMissing(photo, keyword, keywordName)
 end
 
-local function addGeneralBirdKeyword(photo)
-    local animalsKeyword = addKeywordPathIfMissing(photo, { "Animals" })
-    addKeywordIfMissing(photo, "bird", { "birds" }, animalsKeyword)
+local function getOrAddChildKeyword(photo, keywordName, synonyms, parentKeyword)
+    if type(synonyms) == "string" then
+        synonyms = { synonyms }
+    end
+
+    -- Ensure your helper function looks like this:
+
+    if not parentKeyword then
+        outputToLog("Missing parent keyword for " .. keywordName)
+        return nil
+    end
+
+    local targetKeyword = catalog:createKeyword(keywordName, synonyms, true, parentKeyword, true)
+
+    if not targetKeyword then
+        outputToLog(string.format("Failed to get or create keyword %s under %s.", keywordName, parentKeyword:getName()))
+        return nil
+    end
+
+    if targetKeyword and photo then
+        photo:addKeyword(targetKeyword)
+    end
+
+    -- CRITICAL FIX: Always return the keyword object back to the caller!
+    return targetKeyword
 end
 
 local function addSpeciesKeywords(photo, bird)
+    -- Establish the base root path
     local birdsKeyword = addKeywordPathIfMissing(photo, { "Crush Catalog", "Animals", "Birds" })
     if not birdsKeyword then
+        outputToLog("Unable to get or create Birds < Animals < Crush Catalog keyword")
         return
     end
 
-    outputToLog(string.format("Adding common name keyword for bird: %s (%s) with confidence %.1f%%", bird.commonName, bird.scientificName, bird.confidence))
-    addKeywordIfMissing(photo, bird.commonName, { bird.scientificName }, birdsKeyword)
+    -- Write the common name
+    if bird.commonName then
+        local commonNamesKeyword = getOrAddChildKeyword(nil, "Common Names", { "common" }, birdsKeyword)
+        outputToLog(string.format("Adding common name keyword for bird: %s (%s)", bird.commonName, bird.scientificName))
+        addKeywordIfMissing(photo, bird.commonName, { bird.scientificName }, commonNamesKeyword)
+    end
 
-    outputToLog(string.format("Adding scientific name keyword for bird: %s (%s) with confidence %.1f%%", bird.commonName, bird.scientificName, bird.confidence))
-    addKeywordIfMissing(photo, bird.scientificName, { bird.commonName }, birdsKeyword)
+    if not bird.scientificName then
+        outputToLog(string.format("Bird %s is missing scientific name", bird.commonName))
+        return
+    end
+
+    local scientificNamesKeyword = getOrAddChildKeyword(nil, "Scientific Names", {"scientific", "latin"}, birdsKeyword)
+    if not scientificNamesKeyword then
+        scientificNamesKeyword = birdsKeyword
+    end
+
+    -- Split the scientific name using Lua pattern matching
+    -- %s+ matches one or more spaces; ^%s+ captures everything before the space, etc.
+    local genus, species = string.match(bird.scientificName, "^(%S+)%s+(%S+)")
+
+    if not genus or not species then
+        -- Fallback safety check if the scientific name isn't formatted properly
+        outputToLog(string.format("Scientific name %s is not in the proper format", bird.scientificName))
+        addKeywordIfMissing(photo, bird.scientificName, { bird.commonName }, scientificNamesKeyword)
+        return
+    end
+
+    -- Create the Genus keyword under Birds
+    -- Genus names traditionally stand alone as keywords
+    local genusKeyword = getOrAddChildKeyword(photo, genus, {}, scientificNamesKeyword)
+    if not genusKeyword then
+        outputToLog(string.format("Unable to get or create keyword %s under birds", genus))
+        genusKeyword = birdsKeyword
+    end
+
+
+    -- Create the Species keyword under Genus
+    -- A species tag isn't useful alone (e.g., 'alba'), so its official keyword name is the full scientific name.
+    -- We pass the common name as a synonym to this final leaf node.
+    addKeywordIfMissing(photo, bird.scientificName, { bird.commonName }, genusKeyword)
 end
 
 function MetadataHelpers.writeBirdReview(birds, photoPath, reviewStats)
@@ -189,10 +258,6 @@ function MetadataHelpers.writeBirdReview(birds, photoPath, reviewStats)
             for _, bird in ipairs(birds) do
                 outputToLog("Validating bird")
                 validateBird(bird)
-
-                outputToLog("Adding bird keyword")
-                addGeneralBirdKeyword(photo)
-
                 addSpeciesKeywords(photo, bird)
             end
 
