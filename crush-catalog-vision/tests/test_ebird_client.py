@@ -214,3 +214,117 @@ class TestEBirdClient:
             hotspot = ebird_client._get_nearest_hotspot(29.720402, -95.628327)
 
             assert hotspot["locId"] == "near"
+
+    class TestTaxonomyDriftAliases:
+
+        def test_builds_aliases_from_old_taxonomy_versions(self, monkeypatch, ebird_client):
+            ebird_client._taxonomy_versions_cache = None
+            ebird_client._taxonomy_aliases_cache = None
+
+            def mock_get(endpoint, params=None, headers=None):
+                if endpoint.endswith("/ref/taxonomy/versions"):
+                    return [
+                        {"authorityVer": 2025.0, "latest": True},
+                        {"authorityVer": 2024.0, "latest": False},
+                    ]
+
+                if params == {"fmt": "json"}:
+                    return [
+                        {
+                            "speciesCode": "doccor",
+                            "sciName": "Nannopterum auritum",
+                        },
+                        {
+                            "speciesCode": "unchanged",
+                            "sciName": "Sameus birdus",
+                        },
+                    ]
+
+                if params == {"fmt": "json", "version": "2024"}:
+                    return [
+                        {
+                            "speciesCode": "doccor",
+                            "sciName": "Phalacrocorax auritus",
+                        },
+                        {
+                            "speciesCode": "unchanged",
+                            "sciName": "Sameus birdus",
+                        },
+                    ]
+
+                raise AssertionError(f"Unexpected taxonomy request: {endpoint} {params}")
+
+            monkeypatch.setattr(ebird_client, "_get", mock_get)
+
+            aliases = ebird_client.get_scientific_name_aliases()
+
+            assert aliases == {
+                "phalacrocorax auritus": "nannopterum auritum",
+            }
+
+        def test_taxonomy_aliases_are_cached(self, monkeypatch, ebird_client):
+            ebird_client._taxonomy_versions_cache = None
+            ebird_client._taxonomy_aliases_cache = None
+            call_count = 0
+
+            def mock_get(endpoint, params=None, headers=None):
+                nonlocal call_count
+                call_count += 1
+                if endpoint.endswith("/ref/taxonomy/versions"):
+                    return [
+                        {"authorityVer": 2025.0, "latest": True},
+                        {"authorityVer": 2024.0, "latest": False},
+                    ]
+
+                if params == {"fmt": "json"}:
+                    return [{"speciesCode": "doccor", "sciName": "Nannopterum auritum"}]
+
+                if params == {"fmt": "json", "version": "2024"}:
+                    return [{"speciesCode": "doccor", "sciName": "Phalacrocorax auritus"}]
+
+                raise AssertionError(f"Unexpected taxonomy request: {endpoint} {params}")
+
+            monkeypatch.setattr(ebird_client, "_get", mock_get)
+
+            assert ebird_client.get_scientific_name_aliases()["phalacrocorax auritus"] == "nannopterum auritum"
+            assert ebird_client.get_scientific_name_aliases()["phalacrocorax auritus"] == "nannopterum auritum"
+            assert call_count == 3
+
+        def test_cached_aliases_returns_empty_dict_before_preload(self, ebird_client):
+            ebird_client._taxonomy_aliases_cache = None
+
+            assert ebird_client.get_cached_scientific_name_aliases() == {}
+
+        def test_cached_aliases_returns_preloaded_aliases(self, ebird_client):
+            ebird_client._taxonomy_aliases_cache = {
+                "phalacrocorax auritus": "nannopterum auritum",
+            }
+
+            assert ebird_client.get_cached_scientific_name_aliases() == {
+                "phalacrocorax auritus": "nannopterum auritum",
+            }
+
+        def test_prefetch_scientific_name_aliases_runs_in_background(self, monkeypatch, ebird_client):
+            ebird_client._taxonomy_aliases_cache = None
+            ebird_client._taxonomy_aliases_loading = False
+            started_threads = []
+
+            class FakeThread:
+                def __init__(self, target, name=None, daemon=None):
+                    self.target = target
+                    self.name = name
+                    self.daemon = daemon
+                    started_threads.append(self)
+
+                def start(self):
+                    self.target()
+
+            monkeypatch.setattr("ebird_client.threading.Thread", FakeThread)
+            monkeypatch.setattr(ebird_client, "get_scientific_name_aliases", lambda: {"old": "new"})
+
+            ebird_client.prefetch_scientific_name_aliases()
+
+            assert len(started_threads) == 1
+            assert started_threads[0].name == "ebird-taxonomy-alias-prefetch"
+            assert started_threads[0].daemon is True
+            assert ebird_client._taxonomy_aliases_loading is False

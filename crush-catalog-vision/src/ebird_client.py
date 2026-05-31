@@ -4,6 +4,7 @@ import os
 import requests
 import requests_cache
 import json
+import threading
 from urllib.parse import urlencode
 
 DEBUG=False
@@ -22,6 +23,10 @@ class EBirdClient:
         self.cache_allowable_codes = [200, 404]
         self._best_region_cache = []
         self._nearest_hotspot_cache = []
+        self._taxonomy_versions_cache = None
+        self._taxonomy_aliases_cache = None
+        self._taxonomy_aliases_loading = False
+        self._taxonomy_aliases_lock = threading.Lock()
 
         self.session = requests_cache.CachedSession(
             "ebird_cache",
@@ -116,6 +121,77 @@ class EBirdClient:
         headers = {"x-ebirdapitoken": self.api_token}
         data = self._get(endpoint, params=params, headers=headers)
         return {item["speciesCode"]: item for item in data}
+
+    def get_taxonomy_versions(self) -> list[dict[str, any]]:
+        if self._taxonomy_versions_cache is not None:
+            return self._taxonomy_versions_cache
+
+        endpoint = f"{self.base_url}/ref/taxonomy/versions"
+        headers = {"x-ebirdapitoken": self.api_token}
+        self._taxonomy_versions_cache = self._get(endpoint, headers=headers)
+        return self._taxonomy_versions_cache
+
+    def get_taxonomy(self, version: str | int | float | None = None) -> list[dict[str, any]]:
+        endpoint = f"{self.base_url}/ref/taxonomy/ebird"
+        params = {"fmt": "json"}
+        if version is not None:
+            params["version"] = self._taxonomy_version_param(version)
+
+        headers = {"x-ebirdapitoken": self.api_token}
+        return self._get(endpoint, params=params, headers=headers)
+
+    def get_scientific_name_aliases(self) -> dict[str, str]:
+        if self._taxonomy_aliases_cache is not None:
+            return self._taxonomy_aliases_cache
+
+        with self._taxonomy_aliases_lock:
+            if self._taxonomy_aliases_cache is not None:
+                return self._taxonomy_aliases_cache
+
+            current_by_code = self.get_species_code_dict()
+            aliases = {}
+
+            for version in self.get_taxonomy_versions():
+                authority_version = version.get("authorityVer")
+                if not authority_version or version.get("latest"):
+                    continue
+
+                for old_taxon in self.get_taxonomy(authority_version):
+                    species_code = old_taxon.get("speciesCode")
+                    old_scientific_name = old_taxon.get("sciName")
+                    current_taxon = current_by_code.get(species_code)
+                    current_scientific_name = current_taxon.get("sciName") if current_taxon else None
+
+                    if (
+                        old_scientific_name
+                        and current_scientific_name
+                        and old_scientific_name.lower() != current_scientific_name.lower()
+                    ):
+                        aliases[old_scientific_name.lower()] = current_scientific_name.lower()
+
+            self._taxonomy_aliases_cache = aliases
+            return self._taxonomy_aliases_cache
+
+    def get_cached_scientific_name_aliases(self) -> dict[str, str]:
+        return self._taxonomy_aliases_cache or {}
+
+    def prefetch_scientific_name_aliases(self):
+        if self._taxonomy_aliases_cache is not None or self._taxonomy_aliases_loading:
+            return
+
+        self._taxonomy_aliases_loading = True
+
+        def load_aliases():
+            try:
+                aliases = self.get_scientific_name_aliases()
+                print(f"✅ Preloaded {len(aliases)} eBird taxonomy drift aliases")
+            except Exception as exc:
+                print(f"⚠️ Could not preload eBird taxonomy drift aliases: {exc}")
+            finally:
+                self._taxonomy_aliases_loading = False
+
+        thread = threading.Thread(target=load_aliases, name="ebird-taxonomy-alias-prefetch", daemon=True)
+        thread.start()
 
     def get_species_by_scientific_name(self) -> dict[str, any]:
         species_by_code = self.get_species_code_dict()
@@ -358,6 +434,16 @@ class EBirdClient:
             return None
         fallback = location_fallback.strip()
         return fallback or None
+
+    @staticmethod
+    def _taxonomy_version_param(version):
+        try:
+            numeric_version = float(version)
+            if numeric_version.is_integer():
+                return str(int(numeric_version))
+            return str(numeric_version)
+        except (TypeError, ValueError):
+            return str(version)
 
     @staticmethod
     def _distance_meters(lat1, lng1, lat2, lng2):

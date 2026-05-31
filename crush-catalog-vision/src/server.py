@@ -21,10 +21,10 @@ DEFAULT_EBIRD_REGION_ENV = "DEFAULT_EBIRD_REGION"
 _IDENTIFIER_CACHE = {}
 _EBIRD_CLIENT_CACHE = {}
 
-SCIENTIFIC_NAME_ALIASES = {
-    "phalacrocorax auritus": "nannopterum auritum",
-    "phalacrocorax brasilianus": "nannopterum brasilianum",
-    "bubulcus ibis": "ardea ibis" # Cattle Egret --> Western Cattle Egret
+SCIENTIFIC_NAME_ALIAS_OVERRIDES = {
+    # "phalacrocorax auritus": "nannopterum auritum",
+    # "phalacrocorax brasilianus": "nannopterum brasilianum",
+    # "bubulcus ibis": "ardea ibis" # Cattle Egret --> Western Cattle Egret
 }
 
 
@@ -46,11 +46,22 @@ def get_ebird_client(api_token: str | None):
     resolved_token = api_token or os.getenv(DEFAULT_EBIRD_TOKEN_ENV)
     if resolved_token not in _EBIRD_CLIENT_CACHE:
         _EBIRD_CLIENT_CACHE[resolved_token] = EBirdClient(resolved_token)
+        if hasattr(_EBIRD_CLIENT_CACHE[resolved_token], "prefetch_scientific_name_aliases"):
+            _EBIRD_CLIENT_CACHE[resolved_token].prefetch_scientific_name_aliases()
 
     return _EBIRD_CLIENT_CACHE[resolved_token]
 
 
-def _find_taxonomy_match(species, species_by_scientific_name):
+def prime_ebird_cache():
+    token = os.getenv(DEFAULT_EBIRD_TOKEN_ENV)
+    if not token:
+        print("⚠️ EBIRD_TOKEN is not set; eBird taxonomy cache will warm on first request with a token.")
+        return None
+
+    return get_ebird_client(token)
+
+
+def _find_taxonomy_match(species, species_by_scientific_name, scientific_name_aliases=None):
     if not species:
         return None
 
@@ -59,7 +70,16 @@ def _find_taxonomy_match(species, species_by_scientific_name):
     if taxonomy_match:
         return taxonomy_match
 
-    alias = SCIENTIFIC_NAME_ALIASES.get(key)
+    alias = SCIENTIFIC_NAME_ALIAS_OVERRIDES.get(key)
+    if alias:
+        return species_by_scientific_name.get(alias)
+
+    if callable(scientific_name_aliases):
+        aliases = scientific_name_aliases()
+    else:
+        aliases = scientific_name_aliases or {}
+
+    alias = aliases.get(key)
     if alias:
         return species_by_scientific_name.get(alias)
 
@@ -82,7 +102,7 @@ def flatten_predictions(detections):
     return predictions
 
 
-def enrich_predictions_with_taxonomy(detections, species_by_scientific_name):
+def enrich_predictions_with_taxonomy(detections, species_by_scientific_name, scientific_name_aliases=None):
     taxonomy_fields = (
         "comName",
         "sciName",
@@ -94,7 +114,11 @@ def enrich_predictions_with_taxonomy(detections, species_by_scientific_name):
     for detection in detections:
         for pred in detection.get("predictions", []):
             species = pred.get("species")
-            taxonomy_match = _find_taxonomy_match(species, species_by_scientific_name)
+            taxonomy_match = _find_taxonomy_match(
+                species,
+                species_by_scientific_name,
+                scientific_name_aliases=scientific_name_aliases,
+            )
             if taxonomy_match:
                 for field in taxonomy_fields:
                     pred[field] = taxonomy_match.get(field)
@@ -227,7 +251,16 @@ def identify_photo(file_path: str, ebird_token: str, model_name: str | None = No
     sightings = ebird.get_sightings_for_time_of_year(latitude, longitude, timestamp, location_fallback=location_fallback)
     location_info = ebird.get_location_info(latitude, longitude, location_fallback=location_fallback) if hasattr(ebird, "get_location_info") else {}
 
-    enrich_predictions_with_taxonomy(detections, ebird.get_species_by_scientific_name())
+    scientific_name_aliases = (
+        ebird.get_cached_scientific_name_aliases()
+        if hasattr(ebird, "get_cached_scientific_name_aliases")
+        else {}
+    )
+    enrich_predictions_with_taxonomy(
+        detections,
+        ebird.get_species_by_scientific_name(),
+        scientific_name_aliases=scientific_name_aliases,
+    )
     filter_predictions_to_taxonomy(detections)
     predictions = flatten_predictions(detections)
     matches = match_prediction_and_location_data(predictions, sightings)
@@ -392,6 +425,7 @@ class BirdIDRequestHandler(BaseHTTPRequestHandler):
 
 def run_server(host: str = DEFAULT_HOST, port: int = DEFAULT_PORT):
     load_env_file()
+    prime_ebird_cache()
     server_address = (host, port)
     httpd = HTTPServer(server_address, BirdIDRequestHandler)
     print(f"Bird ID backend listening on http://{host}:{port}")

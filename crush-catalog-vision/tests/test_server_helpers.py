@@ -13,6 +13,7 @@ from server import (
     get_identifier,
     lookup_location,
     match_prediction_and_location_data,
+    prime_ebird_cache,
     resolve_location_fallback,
 )
 from bird_identifier import _box_containment, _box_iou, _remove_duplicate_boxes
@@ -67,6 +68,30 @@ def test_enrich_predictions_with_taxonomy_adds_common_and_scientific_names():
     assert "comName" not in detections[0]["predictions"][1]
 
 
+def test_enrich_predictions_with_taxonomy_does_not_load_aliases_for_current_taxonomy_match():
+    detections = [
+        {
+            "predictions": [
+                {"species": "Tyto alba", "confidence": 0.92},
+            ],
+        }
+    ]
+    species_by_scientific_name = {
+        "tyto alba": {
+            "comName": "Barn Owl",
+            "sciName": "Tyto alba",
+            "speciesCode": "brnowl",
+        }
+    }
+
+    def fail_if_loaded():
+        raise AssertionError("Taxonomy drift aliases should be loaded lazily")
+
+    enrich_predictions_with_taxonomy(detections, species_by_scientific_name, scientific_name_aliases=fail_if_loaded)
+
+    assert detections[0]["predictions"][0]["comName"] == "Barn Owl"
+
+
 def test_enrich_predictions_with_taxonomy_uses_scientific_name_aliases():
     detections = [
         {
@@ -92,13 +117,44 @@ def test_enrich_predictions_with_taxonomy_uses_scientific_name_aliases():
             "order": "Suliformes",
         },
     }
+    aliases = {
+        "phalacrocorax brasilianus": "nannopterum brasilianum",
+        "phalacrocorax auritus": "nannopterum auritum",
+    }
 
-    enrich_predictions_with_taxonomy(detections, species_by_scientific_name)
+    enrich_predictions_with_taxonomy(detections, species_by_scientific_name, scientific_name_aliases=aliases)
 
     assert detections[0]["predictions"][0]["comName"] == "Neotropic Cormorant"
     assert detections[0]["predictions"][0]["sciName"] == "Nannopterum brasilianum"
     assert detections[0]["predictions"][1]["comName"] == "Double-crested Cormorant"
     assert detections[0]["predictions"][1]["sciName"] == "Nannopterum auritum"
+
+
+def test_enrich_predictions_with_taxonomy_uses_ebird_taxonomy_drift_aliases():
+    detections = [
+        {
+            "predictions": [
+                {"species": "Oldus birdus", "confidence": 0.94},
+            ],
+        }
+    ]
+    species_by_scientific_name = {
+        "newus birdus": {
+            "comName": "Renamed Bird",
+            "sciName": "Newus birdus",
+            "speciesCode": "renbir",
+            "familySciName": "Exampleidae",
+            "order": "Passeriformes",
+        },
+    }
+    aliases = {
+        "oldus birdus": "newus birdus",
+    }
+
+    enrich_predictions_with_taxonomy(detections, species_by_scientific_name, scientific_name_aliases=aliases)
+
+    assert detections[0]["predictions"][0]["comName"] == "Renamed Bird"
+    assert detections[0]["predictions"][0]["sciName"] == "Newus birdus"
 
 
 def test_filter_predictions_to_taxonomy_removes_non_bird_predictions():
@@ -183,6 +239,62 @@ def test_get_identifier_reuses_model_for_same_configuration(monkeypatch):
     assert len(created_identifiers) == 2
     assert first.model_name == "test-model"
     assert first.device == "cpu"
+
+
+def test_get_ebird_client_prefetches_taxonomy_aliases(monkeypatch):
+    created_clients = []
+
+    class FakeEBirdClient:
+        def __init__(self, api_token):
+            self.api_token = api_token
+            self.prefetch_count = 0
+            created_clients.append(self)
+
+        def prefetch_scientific_name_aliases(self):
+            self.prefetch_count += 1
+
+    server._EBIRD_CLIENT_CACHE.clear()
+    monkeypatch.setattr(server, "EBirdClient", FakeEBirdClient)
+
+    first = server.get_ebird_client("token")
+    second = server.get_ebird_client("token")
+
+    assert first is second
+    assert len(created_clients) == 1
+    assert first.prefetch_count == 1
+
+
+def test_prime_ebird_cache_uses_env_token(monkeypatch):
+    clients = []
+
+    class FakeEBirdClient:
+        def __init__(self, api_token):
+            self.api_token = api_token
+            self.prefetch_count = 0
+            clients.append(self)
+
+        def prefetch_scientific_name_aliases(self):
+            self.prefetch_count += 1
+
+    server._EBIRD_CLIENT_CACHE.clear()
+    monkeypatch.setenv("EBIRD_TOKEN", "env-token")
+    monkeypatch.setattr(server, "EBirdClient", FakeEBirdClient)
+
+    client = prime_ebird_cache()
+
+    assert client.api_token == "env-token"
+    assert len(clients) == 1
+    assert clients[0].prefetch_count == 1
+
+
+def test_prime_ebird_cache_skips_when_env_token_is_missing(monkeypatch):
+    server._EBIRD_CLIENT_CACHE.clear()
+    monkeypatch.delenv("EBIRD_TOKEN", raising=False)
+
+    client = prime_ebird_cache()
+
+    assert client is None
+    assert server._EBIRD_CLIENT_CACHE == {}
 
 
 def test_build_local_species_returns_sorted_unique_species():
