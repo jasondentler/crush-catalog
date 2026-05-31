@@ -13,7 +13,7 @@ return {
             file = "BirdIdentifyAction.lua"
         },
         {
-            title = LOC "$$$/CrushCatalog/ExportSpeciesCsv=Export Identified Species CSV",
+            title = LOC "$$$/CrushCatalog/ExportCsv=Export CSV",
             file = "ExportSpeciesCsvAction.lua"
         },
     },

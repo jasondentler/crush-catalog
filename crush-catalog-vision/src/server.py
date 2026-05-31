@@ -19,6 +19,7 @@ DEFAULT_EBIRD_TOKEN_ENV = "EBIRD_TOKEN"
 DEFAULT_EBIRD_REGION_ENV = "DEFAULT_EBIRD_REGION"
 
 _IDENTIFIER_CACHE = {}
+_EBIRD_CLIENT_CACHE = {}
 
 SCIENTIFIC_NAME_ALIASES = {
     "phalacrocorax auritus": "nannopterum auritum",
@@ -39,6 +40,14 @@ def get_identifier(model_name: str | None = None, device: str | None = None):
         )
 
     return _IDENTIFIER_CACHE[cache_key]
+
+
+def get_ebird_client(api_token: str | None):
+    resolved_token = api_token or os.getenv(DEFAULT_EBIRD_TOKEN_ENV)
+    if resolved_token not in _EBIRD_CLIENT_CACHE:
+        _EBIRD_CLIENT_CACHE[resolved_token] = EBirdClient(resolved_token)
+
+    return _EBIRD_CLIENT_CACHE[resolved_token]
 
 
 def _find_taxonomy_match(species, species_by_scientific_name):
@@ -202,7 +211,7 @@ def identify_photo(file_path: str, ebird_token: str, model_name: str | None = No
     display_image_from_file(file_path)
 
     identifier = get_identifier(model_name=model_name, device=device)
-    ebird = EBirdClient(ebird_token or os.getenv(DEFAULT_EBIRD_TOKEN_ENV))
+    ebird = get_ebird_client(ebird_token)
 
     detections = identifier.predict_from_file(file_path, top_k=20)
     metadata = get_cr3_metadata(file_path)
@@ -227,6 +236,22 @@ def identify_photo(file_path: str, ebird_token: str, model_name: str | None = No
     return build_response(file_path, detections, matches, location_source, local_species, location_info)
 
 
+def lookup_location(latitude: float | None, longitude: float | None, ebird_token: str, location_fallback: str | None = None):
+    if latitude is None or longitude is None:
+        return {"error": "Missing latitude or longitude."}
+
+    ebird = get_ebird_client(ebird_token)
+    location_info = ebird.get_location_info(latitude, longitude, location_fallback=location_fallback)
+    return {
+        "location": {
+            "source": "gps",
+            "region_code": location_info.get("region_code") if location_info else None,
+            "hotspot_id": location_info.get("hotspot_id") if location_info else None,
+            "hotspot_name": location_info.get("hotspot_name") if location_info else None,
+        }
+    }
+
+
 class BirdIDRequestHandler(BaseHTTPRequestHandler):
     server_version = "BirdIDServer/0.1"
 
@@ -243,6 +268,10 @@ class BirdIDRequestHandler(BaseHTTPRequestHandler):
         self._send_json({"error": "Method not allowed. Use POST to /identify."}, status=405)
 
     def do_POST(self):
+        if self.path == "/location":
+            self._handle_location_lookup()
+            return
+
         if self.path != "/identify":
             self._send_json({"error": "Endpoint not found."}, status=404)
             return
@@ -290,6 +319,34 @@ class BirdIDRequestHandler(BaseHTTPRequestHandler):
                 os.unlink(actual_file_path)
             except:
                 pass
+
+    def _handle_location_lookup(self):
+        content_type = self.headers.get("Content-Type", "")
+        content_length = int(self.headers.get("Content-Length", 0))
+        body_bytes = self.rfile.read(content_length)
+
+        if not content_type.startswith("application/json"):
+            self._send_json({"error": "Content-Type must be application/json"}, status=400)
+            return
+
+        try:
+            payload = json.loads(body_bytes.decode("utf-8"))
+            latitude = payload.get("latitude")
+            longitude = payload.get("longitude")
+            ebird_token = payload.get("ebird_token")
+            location_fallback = payload.get("location_fallback")
+
+            if not ebird_token:
+                self._send_json({"error": "Missing required field: ebird_token."}, status=400)
+                return
+
+            latitude = float(latitude) if latitude is not None else None
+            longitude = float(longitude) if longitude is not None else None
+            result = lookup_location(latitude, longitude, ebird_token, location_fallback=location_fallback)
+            status = 400 if result.get("error") else 200
+            self._send_json(result, status=status)
+        except Exception as e:
+            self._send_json({"error": f"Unable to look up location: {str(e)}"})
 
     def _parse_multipart(self, body, boundary):
         """Parse multipart/form-data and extract fields."""

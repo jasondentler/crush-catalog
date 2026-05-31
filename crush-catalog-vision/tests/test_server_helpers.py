@@ -11,6 +11,7 @@ from server import (
     filter_predictions_to_taxonomy,
     flatten_predictions,
     get_identifier,
+    lookup_location,
     match_prediction_and_location_data,
     resolve_location_fallback,
 )
@@ -136,6 +137,29 @@ def test_resolve_location_fallback_returns_none_when_no_region(monkeypatch):
     monkeypatch.delenv("DEFAULT_EBIRD_REGION", raising=False)
 
     assert resolve_location_fallback(None) is None
+
+
+def test_lookup_location_returns_backend_location_payload(monkeypatch):
+    class FakeEBirdClient:
+        def get_location_info(self, latitude, longitude, location_fallback=None):
+            assert latitude == 29.5
+            assert longitude == -95.0
+            return {
+                "region_code": "US-TX-201",
+                "hotspot_id": "L123",
+                "hotspot_name": "City Park",
+            }
+
+    monkeypatch.setattr(server, "get_ebird_client", lambda token: FakeEBirdClient())
+
+    assert lookup_location(29.5, -95.0, "token") == {
+        "location": {
+            "source": "gps",
+            "region_code": "US-TX-201",
+            "hotspot_id": "L123",
+            "hotspot_name": "City Park",
+        }
+    }
 
 
 def test_get_identifier_reuses_model_for_same_configuration(monkeypatch):

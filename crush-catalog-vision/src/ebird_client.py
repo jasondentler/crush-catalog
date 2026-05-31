@@ -130,7 +130,7 @@ class EBirdClient:
         hotspot = None
 
         if lat is not None and lng is not None:
-            region_code = self._get_region_from_coords(lat, lng)
+            region_code = self._get_best_region_from_coords(lat, lng, None)
             hotspot = self._get_nearest_hotspot(lat, lng)
             if not region_code and hotspot:
                 region_code = self._get_region_from_hotspot_id(hotspot["locId"])

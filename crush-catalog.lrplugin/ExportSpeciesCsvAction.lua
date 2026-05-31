@@ -1,9 +1,14 @@
 local LrApplication = import("LrApplication")
+local LrBinding = import("LrBinding")
 local LrDialogs = import("LrDialogs")
+local LrFunctionContext = import("LrFunctionContext")
 local LrLogger = import("LrLogger")
 local LrPathUtils = import("LrPathUtils")
 local LrProgressScope = import("LrProgressScope")
 local LrTasks = import("LrTasks")
+local LrView = import("LrView")
+
+local ExportEBirdRecordCsvAction = require("ExportEBirdRecordCsvAction")
 
 local myLogger = LrLogger("com.jasondentler.crushcatalog.ExportSpeciesCsvAction")
 myLogger:enable("logfile")
@@ -142,6 +147,47 @@ local function writeFile(path, contents)
 	return true, nil
 end
 
+local function chooseExportFormat()
+	return LrFunctionContext.callWithContext("chooseExportFormat", function(context)
+		local f = LrView.osFactory()
+		local props = LrBinding.makePropertyTable(context)
+		props.exportFormat = "species"
+
+		local contents = f:column {
+			spacing = 12,
+			bind_to_object = props,
+			f:static_text {
+				title = "Choose the CSV format to export from the selected photos.",
+				width_in_chars = 56,
+			},
+			f:radio_button {
+				title = "Identified species list",
+				value = LrView.bind("exportFormat"),
+				checked_value = "species",
+			},
+			f:radio_button {
+				title = "eBird Record Format",
+				value = LrView.bind("exportFormat"),
+				checked_value = "ebird_record",
+			},
+		}
+
+		local result = LrDialogs.presentModalDialog({
+			title = "Export CSV",
+			contents = contents,
+			props = props,
+			actionVerb = "Continue",
+			cancelVerb = "Cancel",
+		})
+
+		if result ~= "ok" then
+			return nil
+		end
+
+		return props.exportFormat
+	end)
+end
+
 local function exportIdentifiedSpeciesCsv()
 	local catalog = LrApplication.activeCatalog()
 	local photos = catalog:getTargetPhotos()
@@ -170,7 +216,7 @@ local function exportIdentifiedSpeciesCsv()
 	local rows = {}
 	local seen = {}
 	local progressScope = LrProgressScope({
-		title = "Export Identified Species CSV",
+		title = "Gathering Data for CSV Export",
 	})
 	setProgressCancelable(progressScope, true)
 
@@ -178,7 +224,7 @@ local function exportIdentifiedSpeciesCsv()
 
 	for index, photo in ipairs(photos) do
 		progressScope:setPortionComplete(index - 1, #photos)
-		progressScope:setCaption(string.format("Scanning photo %d of %d...", index, #photos))
+		progressScope:setCaption(string.format("Reading photo %d of %d...", index, #photos))
 
 		if isProgressCanceled(progressScope) then
 			canceled = true
@@ -218,12 +264,21 @@ local function exportIdentifiedSpeciesCsv()
 end
 
 LrTasks.startAsyncTask(function()
-	local success, err = LrTasks.pcall(exportIdentifiedSpeciesCsv)
+	local success, err = LrTasks.pcall(function()
+		local exportFormat = chooseExportFormat()
+		if not exportFormat then
+			outputToLog("CSV export cancelled from format picker")
+			return
+		end
+
+		if exportFormat == "ebird_record" then
+			ExportEBirdRecordCsvAction.export()
+		else
+			exportIdentifiedSpeciesCsv()
+		end
+	end)
+
 	if not success then
-		LrDialogs.message(
-			"Could Not Export Species CSV",
-			"Something went wrong while creating the CSV.\n\nDetails: " .. tostring(err),
-			"critical"
-		)
+		LrDialogs.message("Could Not Export CSV", "Something went wrong while creating the CSV.\n\nDetails: " .. tostring(err), "critical")
 	end
 end)

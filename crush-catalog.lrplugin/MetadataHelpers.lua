@@ -332,6 +332,17 @@ function MetadataHelpers.writeBirdReview(birds, photoPath, reviewStats)
     end)
 end
 
+function MetadataHelpers.writeEbirdLocation(photo, regionCode, hotspotName)
+    if not photo then
+        return
+    end
+
+    catalog:withWriteAccessDo("Update eBird Location Metadata", function()
+        photo:setPropertyForPlugin(_PLUGIN, "ebirdRegionCode", tostring(regionCode or ""))
+        photo:setPropertyForPlugin(_PLUGIN, "ebirdHotspotName", tostring(hotspotName or ""))
+    end)
+end
+
 function MetadataHelpers.writeBirds(birds, photoPath)
     MetadataHelpers.writeBirdReview(birds, photoPath, nil)
 end
