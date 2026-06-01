@@ -157,6 +157,83 @@ def test_enrich_predictions_with_taxonomy_uses_ebird_taxonomy_drift_aliases():
     assert detections[0]["predictions"][0]["sciName"] == "Newus birdus"
 
 
+def test_identify_photo_uses_cached_ebird_taxonomy_aliases_without_hardcoded_mapping(monkeypatch, tmp_path):
+    assert "oldus birdus" not in server.SCIENTIFIC_NAME_ALIAS_OVERRIDES
+
+    class FakeBirdIdentifier:
+        def __init__(self, model_name=None, device=None):
+            pass
+
+        def predict_from_file(self, file_path, top_k=20):
+            return [
+                {
+                    "detection_id": 1,
+                    "box": [0, 0, 100, 100],
+                    "image": None,
+                    "predictions": [
+                        {"species": "Oldus birdus", "confidence": 0.94},
+                    ],
+                }
+            ]
+
+    class FakeEBirdClient:
+        def __init__(self, api_token):
+            pass
+
+        def get_cached_scientific_name_aliases(self):
+            return {"oldus birdus": "newus birdus"}
+
+        def get_species_by_scientific_name(self):
+            return {
+                "newus birdus": {
+                    "comName": "Renamed Bird",
+                    "sciName": "Newus birdus",
+                    "speciesCode": "renbir",
+                    "familySciName": "Exampleidae",
+                    "order": "Passeriformes",
+                },
+            }
+
+        def get_sightings_for_time_of_year(self, lat, lng, timestamp, location_fallback=None):
+            return {
+                "region_code": "US-TX-167",
+                "dates": ["2026/04/02"],
+                "sightings": [
+                    {
+                        "comName": "Renamed Bird",
+                        "sciName": "Newus birdus",
+                        "speciesCode": "renbir",
+                    },
+                ],
+            }
+
+        def get_location_info(self, lat, lng, location_fallback=None):
+            return {"region_code": "US-TX-167", "hotspot_id": None, "hotspot_name": None}
+
+    image_path = tmp_path / "photo.jpg"
+    image_path.write_bytes(b"fake image bytes")
+
+    server._IDENTIFIER_CACHE.clear()
+    server._EBIRD_CLIENT_CACHE.clear()
+    monkeypatch.setattr(server, "BirdIdentifier", FakeBirdIdentifier)
+    monkeypatch.setattr(server, "EBirdClient", FakeEBirdClient)
+    monkeypatch.setattr(server, "display_image_from_file", lambda file_path: None)
+    monkeypatch.setattr(server.TerminalImage, "display", lambda image: None)
+    monkeypatch.setattr(server, "get_cr3_metadata", lambda file_path: {})
+    monkeypatch.setattr(
+        server,
+        "extract_coordinates_and_time",
+        lambda metadata: (29.7604, -95.3698, "2026:04:02 12:00:00"),
+    )
+
+    result = server.identify_photo(str(image_path), "token")
+
+    best_match = result["detections"][0]["best_match"]
+    assert best_match["comName"] == "Renamed Bird"
+    assert best_match["sciName"] == "Newus birdus"
+    assert best_match["is_local"] is True
+
+
 def test_filter_predictions_to_taxonomy_removes_non_bird_predictions():
     detections = [
         {

@@ -1,11 +1,12 @@
 import os
 from pathlib import Path
-from bird_identifier import BirdIdentifier
-from ebird_client import EBirdClient
-from identification import load_env_file, identify
+from crush_catalog_vision.clients.ebird_client import EBirdClient
+from crush_catalog_vision.identification.scoring import identify, load_env_file
+from crush_catalog_vision.vision.bird_identifier import BirdIdentifier
 
 
 def main():
+    """Run the sample CLI workflow against the configured photo folder."""
     print("🪶 Starting Crush Catalog Bird Identification Workflow")
     load_env_file()
 

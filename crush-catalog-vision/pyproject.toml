@@ -27,3 +27,20 @@ build-backend = "setuptools.build_meta"
 
 [project.optional-dependencies]
 tests = ["pytest>=8.0.0"]
+
+[tool.setuptools.package-dir]
+"" = "src"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools]
+py-modules = [
+    "bird_identifier",
+    "cr3_handler",
+    "ebird_client",
+    "identification",
+    "main",
+    "server",
+    "terminal_image",
+]

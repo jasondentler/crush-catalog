@@ -179,12 +179,16 @@ Example shape:
 
 ## Project Structure
 
-- `src/server.py` - lightweight HTTP server and `/identify` endpoint
+- `src/server.py` - compatibility entry point for the HTTP backend
 - `src/main.py` - sample CLI workflow for batch processing
-- `src/bird_identifier.py` - loads YOLO detector and Birder classification model
-- `src/ebird_client.py` - wrapper for eBird API calls and caching
-- `src/cr3_handler.py` - reads CR3 metadata with ExifTool and rawpy
-- `src/identification.py` - matching logic and CLI reporting
+- `src/crush_catalog_vision/api/` - HTTP request handling, server configuration, cached service dependencies, and `/identify` response assembly
+- `src/crush_catalog_vision/clients/` - simple external API clients and API wrappers, including eBird endpoint, logging, and caching layers
+- `src/crush_catalog_vision/services/` - domain logic built on API clients, including eBird location resolution, taxonomy aliases, and sightings aggregation
+- `src/crush_catalog_vision/images/` - CR3/JPEG loading, ExifTool metadata parsing, and terminal image display
+- `src/crush_catalog_vision/identification/` - prediction scoring, local species ranking, and CLI reporting
+- `src/crush_catalog_vision/vision/` - YOLO detection and Birder classification model integration
+
+The older top-level modules (`bird_identifier.py`, `ebird_client.py`, `cr3_handler.py`, `identification.py`, and `terminal_image.py`) remain as compatibility shims for existing imports.
 
 ## Sample Images
 
