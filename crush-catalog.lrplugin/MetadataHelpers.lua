@@ -27,6 +27,10 @@ local function validateBird(bird)
     assert(bird.confidence >= 0 and bird.confidence <= 100, "Invalid confidence value")
 end
 
+local function validateNonBird(nonBird)
+    assert(type(nonBird.scientificName) == "string", "Missing non-bird scientificName")
+end
+
 local function numberOrZero(value)
     return tonumber(value) or 0
 end
@@ -306,7 +310,54 @@ local function addSpeciesKeywords(photo, bird)
     addKeywordIfMissing(photo, bird.scientificName, { bird.commonName }, genusKeyword)
 end
 
-function MetadataHelpers.writeBirdReview(birds, photoPath, reviewStats)
+local function nonBirdRootPath(nonBird)
+    local kingdom = tostring(nonBird.taxonKingdom or "")
+    local kingdomName = tostring(nonBird.taxonKingdomName or nonBird.taxonKingdom or "Other")
+    if kingdom == "Animalia" then
+        return {
+            "Crush Catalog",
+            kingdomName ~= "" and kingdomName or "Animals",
+            tostring(nonBird.taxonClassName or nonBird.taxonClass or "Other"),
+        }
+    end
+
+    return { "Crush Catalog", kingdomName ~= "" and kingdomName or "Other" }
+end
+
+local function addNonBirdKeywords(photo, nonBird)
+    local keywordPath = nonBirdRootPath(nonBird)
+    local nonBirdsKeyword = addKeywordPathIfMissing(photo, keywordPath)
+    if not nonBirdsKeyword then
+        outputToLog("Unable to get or create keyword path: " .. formatKeywordPath(keywordPath))
+        return
+    end
+
+    local commonNamesKeyword = getOrAddChildKeyword(nil, "Common Names", { "common" }, nonBirdsKeyword)
+    if commonNamesKeyword and nonBird.commonName and nonBird.commonName ~= "" then
+        outputToLog(string.format("Adding common name keyword for non-bird: %s (%s)", nonBird.commonName, nonBird.scientificName))
+        addKeywordIfMissing(photo, nonBird.commonName, { nonBird.scientificName }, commonNamesKeyword)
+    end
+
+    local scientificNamesKeyword = getOrAddChildKeyword(nil, "Scientific Names", {"scientific", "latin"}, nonBirdsKeyword)
+    if not scientificNamesKeyword then
+        scientificNamesKeyword = nonBirdsKeyword
+    end
+
+    local genus, species = string.match(nonBird.scientificName, "^(%S+)%s+(%S+)")
+    if not genus or not species then
+        addKeywordIfMissing(photo, nonBird.scientificName, { nonBird.commonName }, scientificNamesKeyword)
+        return
+    end
+
+    local genusKeyword = getOrAddChildKeyword(photo, genus, {}, scientificNamesKeyword)
+    if not genusKeyword then
+        genusKeyword = scientificNamesKeyword
+    end
+
+    addKeywordIfMissing(photo, nonBird.scientificName, { nonBird.commonName }, genusKeyword)
+end
+
+function MetadataHelpers.writeBirdReview(birds, photoPath, reviewStats, nonBirds)
     outputToLog("Writing bird review metadata for photo: " .. photoPath)
     catalog:withWriteAccessDo("Add Bird Review Metadata", function()
         outputToLog("Acquired write access to catalog")
@@ -324,6 +375,12 @@ function MetadataHelpers.writeBirdReview(birds, photoPath, reviewStats)
             outputToLog("Validating bird")
             validateBird(bird)
             addSpeciesKeywords(photo, bird)
+        end
+
+        for _, nonBird in ipairs(nonBirds or {}) do
+            outputToLog("Validating non-bird")
+            validateNonBird(nonBird)
+            addNonBirdKeywords(photo, nonBird)
         end
 
         writeReviewStats(photo, birds, reviewStats)

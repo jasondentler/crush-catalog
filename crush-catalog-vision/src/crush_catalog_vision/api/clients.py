@@ -2,10 +2,12 @@ import os
 
 from crush_catalog_vision.api.config import DEFAULT_DEVICE_ENV, DEFAULT_EBIRD_TOKEN_ENV, DEFAULT_MODEL_ENV
 from crush_catalog_vision.clients.ebird_client import EBirdClient
+from crush_catalog_vision.services.inaturalist_taxonomy import INaturalistTaxonomyService
 from crush_catalog_vision.vision.bird_identifier import BirdIdentifier
 
 _IDENTIFIER_CACHE = {}
 _EBIRD_CLIENT_CACHE = {}
+_INATURALIST_TAXONOMY_CACHE = None
 
 
 def _cached_instance_matches_class(instance, expected_class):
@@ -46,6 +48,19 @@ def get_ebird_client(api_token: str | None, client_class=EBirdClient):
             _EBIRD_CLIENT_CACHE[resolved_token].prefetch_scientific_name_aliases()
 
     return _EBIRD_CLIENT_CACHE[resolved_token]
+
+
+def get_inaturalist_taxonomy(service_class=INaturalistTaxonomyService):
+    """Return a cached iNaturalist taxonomy archive parser."""
+    global _INATURALIST_TAXONOMY_CACHE
+
+    if (
+        _INATURALIST_TAXONOMY_CACHE is None
+        or not _cached_instance_matches_class(_INATURALIST_TAXONOMY_CACHE, service_class)
+    ):
+        _INATURALIST_TAXONOMY_CACHE = service_class()
+
+    return _INATURALIST_TAXONOMY_CACHE
 
 
 def prime_ebird_cache(client_factory=get_ebird_client):

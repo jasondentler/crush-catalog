@@ -25,8 +25,11 @@ _EBIRD_CLIENT_CACHE = client_cache._EBIRD_CLIENT_CACHE
 _find_taxonomy_match = api_identification.find_taxonomy_match
 flatten_predictions = api_identification.flatten_predictions
 enrich_predictions_with_taxonomy = api_identification.enrich_predictions_with_taxonomy
+enrich_non_avian_predictions_with_common_names = api_identification.enrich_non_avian_predictions_with_common_names
 annotate_non_avian_detections = api_identification.annotate_non_avian_detections
 prediction_is_non_avian = api_identification.prediction_is_non_avian
+get_inaturalist_taxon_kingdom = api_identification.get_inaturalist_taxon_kingdom
+get_inaturalist_taxon_class = api_identification.get_inaturalist_taxon_class
 filter_predictions_to_taxonomy = api_identification.filter_predictions_to_taxonomy
 parse_location_fallback = api_identification.parse_location_fallback
 resolve_location_fallback = api_identification.resolve_location_fallback
@@ -46,6 +49,11 @@ def get_ebird_client(api_token: str | None):
 def prime_ebird_cache():
     """Warm the eBird cache through the compatibility module."""
     return client_cache.prime_ebird_cache(client_factory=get_ebird_client)
+
+
+def get_inaturalist_common_name(scientific_name: str | None):
+    """Return an iNaturalist common name through the compatibility module."""
+    return client_cache.get_inaturalist_taxonomy().get_common_name(scientific_name)
 
 
 def build_response(file_path: str, detections, matches, location_source: str, local_species=None, location_info=None):
@@ -70,6 +78,7 @@ class _ServerDependencies:
     resolve_location_fallback = staticmethod(lambda location_fallback: resolve_location_fallback(location_fallback))
     enrich_predictions_with_taxonomy = staticmethod(enrich_predictions_with_taxonomy)
     annotate_non_avian_detections = staticmethod(annotate_non_avian_detections)
+    get_inaturalist_common_name = staticmethod(lambda scientific_name: get_inaturalist_common_name(scientific_name))
     filter_predictions_to_taxonomy = staticmethod(filter_predictions_to_taxonomy)
     flatten_predictions = staticmethod(flatten_predictions)
     match_prediction_and_location_data = staticmethod(match_prediction_and_location_data)

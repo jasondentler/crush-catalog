@@ -1,4 +1,5 @@
 .venv/
+.cache/
 *.egg-info/
 .eggs/
 build/
@@ -11,3 +12,5 @@ models/
 *.pt
 *.sqlite
 .DS_Store
+todo.md
+backend.log

@@ -299,6 +299,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pillow" },
     { name = "python-dotenv" },
+    { name = "python-dwca-reader" },
     { name = "rawpy" },
     { name = "requests" },
     { name = "requests-cache" },
@@ -323,6 +324,7 @@ requires-dist = [
     { name = "pillow", specifier = ">=12.2.0" },
     { name = "pytest", marker = "extra == 'tests'", specifier = ">=8.0.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
+    { name = "python-dwca-reader", specifier = ">=0.16.4" },
     { name = "rawpy", specifier = ">=0.26.1" },
     { name = "requests", specifier = ">=2.33.1" },
     { name = "requests-cache", specifier = ">=1.3.1" },
@@ -1625,6 +1627,15 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/82/ed/0301aeeac3e5353ef3d94b6ec08bbcabd04a72018415dcb29e588514bba8/python_dotenv-1.2.2.tar.gz", hash = "sha256:2c371a91fbd7ba082c2c1dc1f8bf89ca22564a087c2c287cd9b662adde799cf3", size = 50135, upload-time = "2026-03-01T16:00:26.196Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/0b/d7/1959b9648791274998a9c3526f6d0ec8fd2233e4d4acce81bbae76b44b2a/python_dotenv-1.2.2-py3-none-any.whl", hash = "sha256:1d8214789a24de455a8b8bd8ae6fe3c6b69a5e3d64aa8a8e5d68e694bbcb285a", size = 22101, upload-time = "2026-03-01T16:00:25.09Z" },
+]
+
+[[package]]
+name = "python-dwca-reader"
+version = "0.16.4"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/1c/72/2cc9f206d04a96712cb33b7a61c8b6e2fa3c27b521e0b4033d75ae657083/python-dwca-reader-0.16.4.tar.gz", hash = "sha256:cfd26278346e9828716af1525a34ab0d2b6cd847bc261fd475611b23ae5ccc5e", size = 39375, upload-time = "2024-10-18T09:24:06.885Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/df/12/eca4793fd70bf0c46f4193a9444e89da71af46f920fa6b69edf48dcd50bc/python_dwca_reader-0.16.4-py3-none-any.whl", hash = "sha256:7007258866f7b0e335f2c6d59c46607533c0ad46ef85febc6a3bfe4c5b864e7f", size = 41031, upload-time = "2024-10-18T09:24:05.148Z" },
 ]
 
 [[package]]

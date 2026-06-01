@@ -34,7 +34,12 @@ def summarize_identification_result(result):
         top_confidence = top_prediction.get("confidence")
         best_name = best_match.get("comName") or best_match.get("species") or "none"
         best_confidence = best_match.get("confidence")
-        non_avian_name = non_avian_prediction.get("species") or non_avian_prediction.get("name") or "none"
+        non_avian_name = (
+            non_avian_prediction.get("commonName")
+            or non_avian_prediction.get("species")
+            or non_avian_prediction.get("name")
+            or "none"
+        )
         non_avian_confidence = non_avian_prediction.get("confidence")
         non_avian_aggregate_confidence = non_avian_prediction.get("aggregate_confidence")
 

@@ -8,6 +8,7 @@ from server import (
     annotate_non_avian_detections,
     build_response,
     build_local_species,
+    enrich_non_avian_predictions_with_common_names,
     enrich_predictions_with_taxonomy,
     filter_predictions_to_taxonomy,
     flatten_predictions,
@@ -320,7 +321,128 @@ def test_annotate_non_avian_detections_preserves_signal_before_taxonomy_filterin
     assert detections[0]["review_suggestion"] == "not_a_bird"
     assert detections[0]["non_avian_prediction"]["species"] == "Canis lupus"
     assert detections[0]["non_avian_prediction"]["aggregate_confidence"] == 0.93
+    assert detections[0]["non_avian_prediction"]["taxonKingdom"] == "Animalia"
+    assert detections[0]["non_avian_prediction"]["taxonClass"] == "Mammalia"
+    assert detections[0]["non_avian_prediction"]["taxonPath"] == [
+        {"rank": "kingdom", "scientificName": "Animalia"},
+        {"rank": "phylum", "scientificName": "Chordata"},
+        {"rank": "class", "scientificName": "Mammalia"},
+        {"rank": "order", "scientificName": "Carnivora"},
+        {"rank": "family", "scientificName": "Canidae"},
+        {"rank": "genus", "scientificName": "Canis"},
+        {"rank": "species", "scientificName": "Canis lupus"},
+    ]
     assert detections[0]["top_prediction"]["species"] == "Tyto alba"
+
+
+def test_annotate_non_avian_detections_adds_plant_lineage_for_keyword_routing():
+    prediction = {
+        "class_label": "12345_Plantae_Tracheophyta_Magnoliopsida_Malpighiales_Salicaceae_Populus_nigra",
+        "species": "Populus nigra",
+        "confidence": 0.96,
+    }
+    detections = [{"predictions": [prediction], "top_prediction": prediction}]
+
+    annotate_non_avian_detections(detections)
+
+    assert detections[0]["review_suggestion"] == "not_a_bird"
+    assert detections[0]["non_avian_prediction"]["taxonKingdom"] == "Plantae"
+    assert detections[0]["non_avian_prediction"]["taxonClass"] == "Magnoliopsida"
+    assert detections[0]["non_avian_prediction"]["taxonPath"][0]["scientificName"] == "Plantae"
+    assert detections[0]["non_avian_prediction"]["taxonPath"][-1]["scientificName"] == "Populus nigra"
+
+
+def test_enrich_non_avian_predictions_with_common_names_uses_scientific_name_lookup():
+    detections = [
+        {
+            "non_avian_prediction": {
+                "species": "Canis lupus familiaris",
+                "taxonKingdom": "Animalia",
+                "taxonClass": "Mammalia",
+                "taxonPath": [
+                    {"rank": "kingdom", "scientificName": "Animalia"},
+                    {"rank": "class", "scientificName": "Mammalia"},
+                    {"rank": "species", "scientificName": "Canis lupus familiaris"},
+                ],
+                "confidence": 0.93,
+            },
+        },
+        {
+            "non_avian_prediction": {
+                "species": "Unknownus example",
+                "confidence": 0.80,
+            },
+        },
+    ]
+
+    enrich_non_avian_predictions_with_common_names(
+        detections,
+        lambda scientific_name: {
+            "Canis lupus familiaris": "Domestic Dog",
+            "Animalia": "Animals",
+            "Mammalia": "Mammals",
+        }.get(scientific_name),
+    )
+
+    assert detections[0]["non_avian_prediction"]["commonName"] == "Domestic Dog"
+    assert detections[0]["non_avian_prediction"]["taxonKingdomName"] == "Animals"
+    assert detections[0]["non_avian_prediction"]["taxonClassName"] == "Mammals"
+    assert detections[0]["non_avian_prediction"]["taxonPath"] == [
+        {"rank": "kingdom", "scientificName": "Animalia", "englishName": "Animals"},
+        {"rank": "class", "scientificName": "Mammalia", "englishName": "Mammals"},
+        {"rank": "species", "scientificName": "Canis lupus familiaris", "englishName": "Domestic Dog"},
+    ]
+    assert "commonName" not in detections[1]["non_avian_prediction"]
+
+
+def test_enrich_non_avian_predictions_with_common_names_adds_non_animal_kingdom_name():
+    detections = [
+        {
+            "non_avian_prediction": {
+                "species": "Populus nigra",
+                "taxonKingdom": "Plantae",
+                "taxonClass": "Magnoliopsida",
+                "taxonPath": [
+                    {"rank": "kingdom", "scientificName": "Plantae"},
+                    {"rank": "class", "scientificName": "Magnoliopsida"},
+                    {"rank": "species", "scientificName": "Populus nigra"},
+                ],
+            },
+        },
+    ]
+
+    enrich_non_avian_predictions_with_common_names(
+        detections,
+        lambda scientific_name: {
+            "Populus nigra": "Black Poplar",
+            "Plantae": "Plants",
+            "Magnoliopsida": "Dicots",
+        }.get(scientific_name),
+    )
+
+    assert detections[0]["non_avian_prediction"]["commonName"] == "Black Poplar"
+    assert detections[0]["non_avian_prediction"]["taxonKingdomName"] == "Plants"
+    assert detections[0]["non_avian_prediction"]["taxonClassName"] == "Dicots"
+
+
+def test_enrich_non_avian_predictions_with_common_names_keeps_not_bird_when_lookup_fails():
+    detections = [
+        {
+            "review_suggestion": "not_a_bird",
+            "non_avian_prediction": {
+                "species": "Canis lupus familiaris",
+                "confidence": 0.93,
+            },
+        },
+    ]
+
+    def fail_lookup(scientific_name):
+        raise RuntimeError("archive unavailable")
+
+    enrich_non_avian_predictions_with_common_names(detections, fail_lookup)
+
+    assert detections[0]["review_suggestion"] == "not_a_bird"
+    assert "commonName" not in detections[0]["non_avian_prediction"]
 
 
 def test_resolve_location_fallback_prefers_request_value(monkeypatch):

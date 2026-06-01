@@ -86,15 +86,49 @@ def filter_predictions_to_taxonomy(detections):
 
 def get_inaturalist_taxon_class(prediction):
     """Return the iNaturalist class name encoded in a Birder class label."""
+    return get_inaturalist_taxon_rank(prediction, 3)
+
+
+def get_inaturalist_taxon_kingdom(prediction):
+    """Return the iNaturalist kingdom name encoded in a Birder class label."""
+    return get_inaturalist_taxon_rank(prediction, 1)
+
+
+def get_inaturalist_taxon_rank(prediction, index):
+    """Return a rank value from the model's iNaturalist class label."""
     class_label = prediction.get("class_label") if prediction else None
     if not class_label:
         return None
 
     parts = class_label.split("_")
-    if len(parts) < 4:
+    if len(parts) <= index:
         return None
 
-    return parts[3]
+    return parts[index]
+
+
+def build_inaturalist_taxon_path(prediction):
+    """Return the model's iNaturalist lineage from kingdom through species."""
+    class_label = prediction.get("class_label") if prediction else None
+    if not class_label:
+        return []
+
+    parts = class_label.split("_")
+    if len(parts) < 4:
+        return []
+
+    lineage = []
+    rank_names = ("kingdom", "phylum", "class", "order", "family")
+    for rank, scientific_name in zip(rank_names, parts[1:6]):
+        lineage.append({"rank": rank, "scientificName": scientific_name})
+
+    if len(parts) >= 8:
+        genus = parts[-2]
+        species = f"{parts[-2]} {parts[-1]}"
+        lineage.append({"rank": "genus", "scientificName": genus})
+        lineage.append({"rank": "species", "scientificName": species})
+
+    return lineage
 
 
 def prediction_is_non_avian(prediction):
@@ -136,7 +170,46 @@ def annotate_non_avian_detections(detections, threshold=NON_AVIAN_CONFIDENCE_THR
             detection["review_suggestion"] = "not_a_bird"
             non_avian_prediction = dict(top_prediction)
             non_avian_prediction["aggregate_confidence"] = round(aggregate_confidence, 4)
+            non_avian_prediction["taxonKingdom"] = get_inaturalist_taxon_kingdom(top_prediction)
+            non_avian_prediction["taxonClass"] = get_inaturalist_taxon_class(top_prediction)
+            non_avian_prediction["taxonPath"] = build_inaturalist_taxon_path(top_prediction)
             detection["non_avian_prediction"] = non_avian_prediction
+
+
+def enrich_non_avian_predictions_with_common_names(detections, common_name_lookup):
+    """Attach iNaturalist English names to non-avian detection summaries."""
+    if not callable(common_name_lookup):
+        return
+
+    for detection in detections or []:
+        non_avian_prediction = detection.get("non_avian_prediction")
+        if not non_avian_prediction:
+            continue
+
+        common_name = safe_common_name_lookup(common_name_lookup, non_avian_prediction.get("species"))
+        kingdom_name = safe_common_name_lookup(common_name_lookup, non_avian_prediction.get("taxonKingdom"))
+        class_name = safe_common_name_lookup(common_name_lookup, non_avian_prediction.get("taxonClass"))
+
+        if common_name:
+            non_avian_prediction["commonName"] = common_name
+        if kingdom_name:
+            non_avian_prediction["taxonKingdomName"] = kingdom_name
+        if class_name:
+            non_avian_prediction["taxonClassName"] = class_name
+
+        for taxon in non_avian_prediction.get("taxonPath") or []:
+            english_name = safe_common_name_lookup(common_name_lookup, taxon.get("scientificName"))
+            if english_name:
+                taxon["englishName"] = english_name
+
+
+def safe_common_name_lookup(common_name_lookup, scientific_name):
+    """Return a common name lookup result without blocking identification."""
+    try:
+        return common_name_lookup(scientific_name)
+    except Exception as exc:
+        print(f"⚠️ Could not look up iNaturalist common name: {exc}", flush=True)
+        return None
 
 
 def log_raw_detection_predictions(detections, limit=5):
@@ -304,6 +377,8 @@ def identify_photo(
     )
     if hasattr(dependencies, "annotate_non_avian_detections"):
         dependencies.annotate_non_avian_detections(detections)
+    if hasattr(dependencies, "get_inaturalist_common_name"):
+        enrich_non_avian_predictions_with_common_names(detections, dependencies.get_inaturalist_common_name)
     dependencies.filter_predictions_to_taxonomy(detections)
     predictions = dependencies.flatten_predictions(detections)
     matches = dependencies.match_prediction_and_location_data(predictions, sightings)

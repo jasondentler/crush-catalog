@@ -176,6 +176,28 @@ local function leafName(path)
 	return LrPathUtils.leafName(path)
 end
 
+local function fileSize(path)
+	if not path or path == "" then
+		return nil
+	end
+
+	local success, attributes = LrTasks.pcall(function()
+		return LrFileUtils.fileAttributes(path)
+	end)
+	if success and attributes and tonumber(attributes.fileSize) then
+		return tonumber(attributes.fileSize)
+	end
+
+	local file = io.open(path, "rb")
+	if not file then
+		return nil
+	end
+
+	local size = file:seek("end")
+	file:close()
+	return tonumber(size)
+end
+
 local function getPhotoBatch(photos, startIndex, batchSize)
 	local batch = {}
 	local endIndex = math.min(startIndex + batchSize - 1, #photos)
@@ -405,8 +427,9 @@ local function askForLocationFallback(photoPath)
 	return fallbackRegion
 end
 
-local function writeBirdReview(birds, originalPhotoPath, reviewStats)
-	if #birds == 0 and not reviewStats then
+local function writeBirdReview(birds, originalPhotoPath, reviewStats, nonBirds)
+	nonBirds = nonBirds or {}
+	if #birds == 0 and #nonBirds == 0 and not reviewStats then
 		outputToLog("No confirmed birds to write for originalPhotoPath=" .. tostring(originalPhotoPath))
 		return
 	end
@@ -416,8 +439,13 @@ local function writeBirdReview(birds, originalPhotoPath, reviewStats)
 		return
 	end
 
-	outputToLog(string.format("Writing %d confirmed birds and review stats to originalPhotoPath=%s", #birds, tostring(originalPhotoPath)))
-	MetadataHelpers.writeBirdReview(birds, originalPhotoPath, reviewStats)
+	outputToLog(string.format(
+		"Writing %d confirmed birds, %d non-birds, and review stats to originalPhotoPath=%s",
+		#birds,
+		#nonBirds,
+		tostring(originalPhotoPath)
+	))
+	MetadataHelpers.writeBirdReview(birds, originalPhotoPath, reviewStats, nonBirds)
 end
 
 local function getDetectionCount(response)
@@ -467,6 +495,25 @@ local function shouldMarkNotBird(detection)
 		and detection.non_avian_prediction ~= nil
 end
 
+local function buildNonBirdConfirmation(detection)
+	local prediction = detection and detection.non_avian_prediction or {}
+	local scientificName = prediction.species or prediction.sciName
+	local commonName = prediction.commonName or prediction.comName
+
+	return {
+		status = "rejected",
+		reason = "not_a_bird",
+		commonName = commonName,
+		scientificName = scientificName,
+		taxonKingdom = prediction.taxonKingdom,
+		taxonKingdomName = prediction.taxonKingdomName,
+		taxonClass = prediction.taxonClass,
+		taxonClassName = prediction.taxonClassName,
+		taxonPath = prediction.taxonPath,
+		confidence = getNonAvianConfidencePercent(detection),
+	}
+end
+
 local function confirmBestMatch(detection, selectionSource)
 	local match = detection and detection.best_match
 	if not match then
@@ -498,11 +545,12 @@ local function autoReviewDetection(detection, reviewOptions)
 	if shouldMarkNotBird(detection) then
 		local nonAvianPrediction = detection.non_avian_prediction or {}
 		outputToLog(string.format(
-			"Auto-marking detection not-a-bird from non-avian prediction species=%s confidence=%.1f",
+			"Auto-marking detection not-a-bird from non-avian prediction commonName=%s species=%s confidence=%.1f",
+			tostring(nonAvianPrediction.commonName),
 			tostring(nonAvianPrediction.species),
 			getNonAvianConfidencePercent(detection)
 		))
-		return { status = "rejected", reason = "not_a_bird" }
+		return buildNonBirdConfirmation(detection)
 	end
 
 	if reviewOptions.unattended then
@@ -563,6 +611,7 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response, revi
 	end
 
 	local birds = {}
+	local nonBirds = {}
 	local reviewStats = newReviewStats(response)
 	for detectionIndex, detection in ipairs(response.detections or {}) do
 		if not waitIfProgressPaused(progressScope, "Paused reviewing birds.") then
@@ -616,6 +665,25 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response, revi
 		elseif confirmation and confirmation.status == "stopped" then
 			outputToLog("Stopping review at originalPhotoPath=" .. tostring(originalPhotoPath))
 			return false
+		elseif confirmation and confirmation.reason == "not_a_bird" and confirmation.scientificName then
+			outputToLog(string.format(
+				"Accepted non-bird detection index=%d originalPhotoPath=%s commonName=%s scientificName=%s",
+				detectionIndex,
+				tostring(originalPhotoPath),
+				tostring(confirmation.commonName),
+				tostring(confirmation.scientificName)
+			))
+			local nonBird = {
+				commonName = confirmation.commonName,
+				scientificName = confirmation.scientificName,
+				taxonKingdom = confirmation.taxonKingdom,
+				taxonKingdomName = confirmation.taxonKingdomName,
+				taxonClass = confirmation.taxonClass,
+				taxonClassName = confirmation.taxonClassName,
+				taxonPath = confirmation.taxonPath,
+				confidence = tonumber(confirmation.confidence) or 0
+			}
+			table.insert(nonBirds, nonBird)
 		else
 			outputToLog(string.format(
 				"Skipped detection index=%d originalPhotoPath=%s status=%s reason=%s",
@@ -627,7 +695,7 @@ local function showResponse(exportedPhotoPath, originalPhotoPath, response, revi
 		end
 	end
 
-	writeBirdReview(birds, originalPhotoPath, reviewStats)
+	writeBirdReview(birds, originalPhotoPath, reviewStats, nonBirds)
 	return true
 end
 
@@ -638,12 +706,18 @@ local function postPayload(payload)
 	end
 
 	local photoFileName = payload.photo_path:match("[^/\\]+$") or "photo.jpg"
+	local payloadFileSize = fileSize(payload.photo_path)
+	if not payloadFileSize then
+		return nil, "Could not determine exported JPEG file size for " .. tostring(payload.photo_path)
+	end
+
 	local parts = {
 		{
 			name = "image_data",
 			filePath = payload.photo_path,
 			fileName = photoFileName,
 			contentType = "image/jpeg",
+			fileSize = payloadFileSize,
 		},
 		{
 			name = "ebird_token",
