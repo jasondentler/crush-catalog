@@ -5,12 +5,14 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..",
 
 import server
 from server import (
+    annotate_non_avian_detections,
     build_response,
     build_local_species,
     enrich_predictions_with_taxonomy,
     filter_predictions_to_taxonomy,
     flatten_predictions,
     get_identifier,
+    prediction_is_non_avian,
     lookup_location,
     match_prediction_and_location_data,
     prime_ebird_cache,
@@ -251,6 +253,73 @@ def test_filter_predictions_to_taxonomy_removes_non_bird_predictions():
     assert detections[0]["predictions"] == [
         {"species": "Tyto alba", "comName": "Western Barn Owl", "sciName": "Tyto alba"}
     ]
+    assert detections[0]["top_prediction"]["species"] == "Tyto alba"
+
+
+def test_prediction_is_non_avian_uses_inaturalist_taxon_class_and_confidence():
+    prediction = {
+        "class_label": "08952_Animalia_Chordata_Mammalia_Carnivora_Canidae_Canis_lupus",
+        "species": "Canis lupus",
+        "confidence": 0.20,
+    }
+
+    assert prediction_is_non_avian(prediction) is True
+
+
+def test_prediction_is_non_avian_ignores_birds():
+    prediction = {
+        "class_label": "04200_Animalia_Chordata_Aves_Strigiformes_Tytonidae_Tyto_alba",
+        "species": "Tyto alba",
+        "confidence": 0.98,
+    }
+
+    assert prediction_is_non_avian(prediction) is False
+
+
+def test_annotate_non_avian_detections_requires_high_aggregate_non_avian_confidence():
+    prediction = {
+        "class_label": "08952_Animalia_Chordata_Mammalia_Carnivora_Canidae_Canis_lupus",
+        "species": "Canis lupus",
+        "confidence": 0.40,
+    }
+    detections = [{"predictions": [prediction], "top_prediction": prediction}]
+
+    annotate_non_avian_detections(detections)
+
+    assert "review_suggestion" not in detections[0]
+
+
+def test_annotate_non_avian_detections_preserves_signal_before_taxonomy_filtering():
+    detections = [
+        {
+            "predictions": [
+                {
+                    "class_label": "08952_Animalia_Chordata_Mammalia_Carnivora_Canidae_Canis_lupus",
+                    "species": "Canis lupus",
+                    "confidence": 0.60,
+                },
+                {
+                    "class_label": "04679_Animalia_Chordata_Mammalia_Carnivora_Felidae_Felis_catus",
+                    "species": "Felis catus",
+                    "confidence": 0.33,
+                },
+                {
+                    "class_label": "04200_Animalia_Chordata_Aves_Strigiformes_Tytonidae_Tyto_alba",
+                    "species": "Tyto alba",
+                    "confidence": 0.02,
+                    "comName": "Western Barn Owl",
+                    "sciName": "Tyto alba",
+                },
+            ],
+        }
+    ]
+
+    annotate_non_avian_detections(detections)
+    filter_predictions_to_taxonomy(detections)
+
+    assert detections[0]["review_suggestion"] == "not_a_bird"
+    assert detections[0]["non_avian_prediction"]["species"] == "Canis lupus"
+    assert detections[0]["non_avian_prediction"]["aggregate_confidence"] == 0.93
     assert detections[0]["top_prediction"]["species"] == "Tyto alba"
 
 

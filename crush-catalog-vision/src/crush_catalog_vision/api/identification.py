@@ -1,7 +1,11 @@
 import os
 from pathlib import Path
 
-from crush_catalog_vision.api.config import DEFAULT_EBIRD_REGION_ENV, SCIENTIFIC_NAME_ALIAS_OVERRIDES
+from crush_catalog_vision.api.config import (
+    DEFAULT_EBIRD_REGION_ENV,
+    NON_AVIAN_CONFIDENCE_THRESHOLD,
+    SCIENTIFIC_NAME_ALIAS_OVERRIDES,
+)
 
 
 def find_taxonomy_match(species, species_by_scientific_name, scientific_name_aliases=None):
@@ -78,6 +82,82 @@ def filter_predictions_to_taxonomy(detections):
             if pred.get("comName") and pred.get("sciName")
         ]
         detection["top_prediction"] = detection["predictions"][0] if detection["predictions"] else None
+
+
+def get_inaturalist_taxon_class(prediction):
+    """Return the iNaturalist class name encoded in a Birder class label."""
+    class_label = prediction.get("class_label") if prediction else None
+    if not class_label:
+        return None
+
+    parts = class_label.split("_")
+    if len(parts) < 4:
+        return None
+
+    return parts[3]
+
+
+def prediction_is_non_avian(prediction):
+    """Return whether a model prediction names a non-bird taxon."""
+    if not prediction:
+        return False
+
+    taxon_class = get_inaturalist_taxon_class(prediction)
+    return bool(taxon_class) and taxon_class != "Aves"
+
+
+def prediction_confidence(prediction):
+    """Return a prediction confidence as a float, or zero when missing."""
+    try:
+        return float(prediction.get("confidence") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def non_avian_confidence(predictions):
+    """Return summed confidence for non-bird iNaturalist predictions."""
+    return sum(
+        prediction_confidence(prediction)
+        for prediction in predictions or []
+        if prediction_is_non_avian(prediction)
+    )
+
+
+def annotate_non_avian_detections(detections, threshold=NON_AVIAN_CONFIDENCE_THRESHOLD):
+    """Mark detections whose raw predictions are confidently non-avian overall."""
+    for detection in detections:
+        predictions = detection.get("predictions") or []
+        top_prediction = detection.get("top_prediction")
+        if not top_prediction and predictions:
+            top_prediction = predictions[0] if predictions else None
+
+        aggregate_confidence = non_avian_confidence(predictions)
+        if prediction_is_non_avian(top_prediction) and aggregate_confidence >= threshold:
+            detection["review_suggestion"] = "not_a_bird"
+            non_avian_prediction = dict(top_prediction)
+            non_avian_prediction["aggregate_confidence"] = round(aggregate_confidence, 4)
+            detection["non_avian_prediction"] = non_avian_prediction
+
+
+def log_raw_detection_predictions(detections, limit=5):
+    """Print raw model predictions before taxonomy filtering for debugging."""
+    for detection_index, detection in enumerate(detections or [], start=1):
+        predictions = detection.get("predictions") or []
+        print(
+            f"Raw detection index={detection_index} id={detection.get('detection_id')} predictions={len(predictions)}",
+            flush=True,
+        )
+        for prediction in predictions[:limit]:
+            print(
+                "Raw prediction "
+                f"detection={detection_index} "
+                f"rank={prediction.get('rank')} "
+                f"species={prediction.get('species')} "
+                f"confidence={prediction.get('confidence')} "
+                f"taxon_class={get_inaturalist_taxon_class(prediction) or 'unknown'} "
+                f"class_label={prediction.get('class_label')}",
+                flush=True,
+            )
 
 
 def parse_location_fallback(location_fallback: str | None) -> str | None:
@@ -198,6 +278,7 @@ def identify_photo(
     ebird = dependencies.get_ebird_client(ebird_token)
 
     detections = identifier.predict_from_file(file_path, top_k=20)
+    log_raw_detection_predictions(detections)
     metadata = dependencies.get_cr3_metadata(file_path)
     latitude, longitude, timestamp = dependencies.extract_coordinates_and_time(metadata)
     location_source = "gps"
@@ -221,6 +302,8 @@ def identify_photo(
         ebird.get_species_by_scientific_name(),
         scientific_name_aliases=scientific_name_aliases,
     )
+    if hasattr(dependencies, "annotate_non_avian_detections"):
+        dependencies.annotate_non_avian_detections(detections)
     dependencies.filter_predictions_to_taxonomy(detections)
     predictions = dependencies.flatten_predictions(detections)
     matches = dependencies.match_prediction_and_location_data(predictions, sightings)

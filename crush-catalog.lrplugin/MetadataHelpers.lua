@@ -8,6 +8,7 @@ local myLogger = LrLogger( 'com.jasondentler.crushcatalog.MetadataHelpers' )
 myLogger:enable( "logfile" )
 
 local MetadataHelpers = {}
+local CATALOG_WRITE_TIMEOUT_SECONDS = 30
 
 local function outputToLog( message )
 	myLogger:trace( message )
@@ -307,29 +308,26 @@ end
 
 function MetadataHelpers.writeBirdReview(birds, photoPath, reviewStats)
     outputToLog("Writing bird review metadata for photo: " .. photoPath)
-    LrTasks.startAsyncTask(function()
-        outputToLog("Started async task to write bird review metadata")
-        catalog:withWriteAccessDo("Add Bird Review Metadata", function()
-            outputToLog("Acquired write access to catalog")
-            local photo = catalog:findPhotoByPath(photoPath)
-            if not photo then
-                outputToLog("Could not find photo in catalog for path: " .. photoPath)
-                return
-            else
-                outputToLog("Writing bird metadata to photo: " .. photoPath)
-            end
+    catalog:withWriteAccessDo("Add Bird Review Metadata", function()
+        outputToLog("Acquired write access to catalog")
+        local photo = catalog:findPhotoByPath(photoPath)
+        if not photo then
+            outputToLog("Could not find photo in catalog for path: " .. photoPath)
+            return
+        else
+            outputToLog("Writing bird metadata to photo: " .. photoPath)
+        end
 
-            clearCrushCatalogKeywords(photo)
+        clearCrushCatalogKeywords(photo)
 
-            for _, bird in ipairs(birds) do
-                outputToLog("Validating bird")
-                validateBird(bird)
-                addSpeciesKeywords(photo, bird)
-            end
+        for _, bird in ipairs(birds) do
+            outputToLog("Validating bird")
+            validateBird(bird)
+            addSpeciesKeywords(photo, bird)
+        end
 
-            writeReviewStats(photo, birds, reviewStats)
-        end)
-    end)
+        writeReviewStats(photo, birds, reviewStats)
+    end, { timeout = CATALOG_WRITE_TIMEOUT_SECONDS })
 end
 
 function MetadataHelpers.writeEbirdLocation(photo, regionCode, hotspotName)
@@ -340,7 +338,7 @@ function MetadataHelpers.writeEbirdLocation(photo, regionCode, hotspotName)
     catalog:withWriteAccessDo("Update eBird Location Metadata", function()
         photo:setPropertyForPlugin(_PLUGIN, "ebirdRegionCode", tostring(regionCode or ""))
         photo:setPropertyForPlugin(_PLUGIN, "ebirdHotspotName", tostring(hotspotName or ""))
-    end)
+    end, { timeout = CATALOG_WRITE_TIMEOUT_SECONDS })
 end
 
 function MetadataHelpers.writeBirds(birds, photoPath)

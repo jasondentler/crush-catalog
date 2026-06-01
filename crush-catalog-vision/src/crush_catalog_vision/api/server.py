@@ -1,10 +1,71 @@
 import json
 import os
 import tempfile
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from crush_catalog_vision.api.config import DEFAULT_HOST, DEFAULT_PORT
 from crush_catalog_vision.api.http import parse_multipart_form
+
+
+def log_backend(message):
+    """Write an immediately flushed backend log line for terminal and tee logs."""
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    print(f"[{timestamp}] {message}", flush=True)
+
+
+def summarize_identification_result(result):
+    """Return concise log lines describing an identify response."""
+    detections = result.get("detections") or []
+    lines = [
+        (
+            "Identify result "
+            f"detections={len(detections)} "
+            f"location_source={result.get('location_source')} "
+            f"error={result.get('error') or 'none'}"
+        )
+    ]
+
+    for index, detection in enumerate(detections, start=1):
+        top_prediction = detection.get("top_prediction") or {}
+        best_match = detection.get("best_match") or {}
+        non_avian_prediction = detection.get("non_avian_prediction") or {}
+        top_name = top_prediction.get("comName") or top_prediction.get("species") or "none"
+        top_confidence = top_prediction.get("confidence")
+        best_name = best_match.get("comName") or best_match.get("species") or "none"
+        best_confidence = best_match.get("confidence")
+        non_avian_name = non_avian_prediction.get("species") or non_avian_prediction.get("name") or "none"
+        non_avian_confidence = non_avian_prediction.get("confidence")
+        non_avian_aggregate_confidence = non_avian_prediction.get("aggregate_confidence")
+
+        lines.append(
+            (
+                "Detection "
+                f"index={index} "
+                f"id={detection.get('detection_id')} "
+                f"review_suggestion={detection.get('review_suggestion') or 'none'} "
+                f"top={top_name} "
+                f"top_confidence={format_confidence(top_confidence)} "
+                f"best={best_name} "
+                f"best_confidence={format_confidence(best_confidence)} "
+                f"non_avian={non_avian_name} "
+                f"non_avian_confidence={format_confidence(non_avian_confidence)} "
+                f"non_avian_aggregate_confidence={format_confidence(non_avian_aggregate_confidence)}"
+            )
+        )
+
+    return lines
+
+
+def format_confidence(value):
+    """Format a model confidence for backend log output."""
+    if value is None:
+        return "none"
+
+    try:
+        return f"{float(value):.3f}"
+    except (TypeError, ValueError):
+        return str(value)
 
 
 def build_request_handler(dependencies):
@@ -45,11 +106,19 @@ def build_request_handler(dependencies):
 
             boundary_str = content_type.split("boundary=")[1].encode()
             image_data, ebird_token, location_fallback, filename = self._parse_multipart(body_bytes, boundary_str)
+            log_backend(
+                "Identify request "
+                f"filename={filename or 'unknown'} "
+                f"bytes={len(image_data or b'')} "
+                f"location_fallback={location_fallback or 'none'}"
+            )
 
             if not image_data:
+                log_backend("Identify request rejected: missing image_data")
                 self._send_json({"error": "Missing required field: image_data."}, status=400)
                 return
             if not ebird_token:
+                log_backend("Identify request rejected: missing ebird_token")
                 self._send_json({"error": "Missing required field: ebird_token."}, status=400)
                 return
 
@@ -71,8 +140,11 @@ def build_request_handler(dependencies):
                     location_fallback=location_fallback,
                 )
                 result["file_path"] = "uploaded_image.jpg"
+                for line in summarize_identification_result(result):
+                    log_backend(line)
                 self._send_json(result)
             except Exception as e:
+                log_backend(f"Identify request failed: {e}")
                 self._send_json({"error": f"Unable to identify image: {str(e)}"})
             finally:
                 try:
@@ -126,5 +198,5 @@ def run_server(handler_class, load_env_file, prime_ebird_cache, host: str = DEFA
     prime_ebird_cache()
     server_address = (host, port)
     httpd = HTTPServer(server_address, handler_class)
-    print(f"Bird ID backend listening on http://{host}:{port}")
+    log_backend(f"Bird ID backend listening on http://{host}:{port}")
     httpd.serve_forever()

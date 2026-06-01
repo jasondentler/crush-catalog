@@ -455,6 +455,18 @@ local function getBestMatchConfidencePercent(detection)
 	return confidence and confidence * 100 or 0
 end
 
+local function getNonAvianConfidencePercent(detection)
+	local prediction = detection and detection.non_avian_prediction
+	local confidence = tonumber(prediction and (prediction.aggregate_confidence or prediction.confidence))
+	return confidence and confidence * 100 or 0
+end
+
+local function shouldMarkNotBird(detection)
+	return detection
+		and detection.review_suggestion == "not_a_bird"
+		and detection.non_avian_prediction ~= nil
+end
+
 local function confirmBestMatch(detection, selectionSource)
 	local match = detection and detection.best_match
 	if not match then
@@ -482,6 +494,16 @@ local function autoReviewDetection(detection, reviewOptions)
 	end
 
 	local confidence = getBestMatchConfidencePercent(detection)
+
+	if shouldMarkNotBird(detection) then
+		local nonAvianPrediction = detection.non_avian_prediction or {}
+		outputToLog(string.format(
+			"Auto-marking detection not-a-bird from non-avian prediction species=%s confidence=%.1f",
+			tostring(nonAvianPrediction.species),
+			getNonAvianConfidencePercent(detection)
+		))
+		return { status = "rejected", reason = "not_a_bird" }
+	end
 
 	if reviewOptions.unattended then
 		if reviewOptions.unattendedMode == "always" then

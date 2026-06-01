@@ -25,6 +25,8 @@ _EBIRD_CLIENT_CACHE = client_cache._EBIRD_CLIENT_CACHE
 _find_taxonomy_match = api_identification.find_taxonomy_match
 flatten_predictions = api_identification.flatten_predictions
 enrich_predictions_with_taxonomy = api_identification.enrich_predictions_with_taxonomy
+annotate_non_avian_detections = api_identification.annotate_non_avian_detections
+prediction_is_non_avian = api_identification.prediction_is_non_avian
 filter_predictions_to_taxonomy = api_identification.filter_predictions_to_taxonomy
 parse_location_fallback = api_identification.parse_location_fallback
 resolve_location_fallback = api_identification.resolve_location_fallback
@@ -67,6 +69,7 @@ class _ServerDependencies:
     get_ebird_client = staticmethod(lambda token: get_ebird_client(token))
     resolve_location_fallback = staticmethod(lambda location_fallback: resolve_location_fallback(location_fallback))
     enrich_predictions_with_taxonomy = staticmethod(enrich_predictions_with_taxonomy)
+    annotate_non_avian_detections = staticmethod(annotate_non_avian_detections)
     filter_predictions_to_taxonomy = staticmethod(filter_predictions_to_taxonomy)
     flatten_predictions = staticmethod(flatten_predictions)
     match_prediction_and_location_data = staticmethod(match_prediction_and_location_data)
