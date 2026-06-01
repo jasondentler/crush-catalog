@@ -3,9 +3,11 @@ import os
 import tempfile
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from urllib.parse import urlparse
 
 from crush_catalog_vision.api.config import DEFAULT_HOST, DEFAULT_PORT
 from crush_catalog_vision.api.http import parse_multipart_form
+from crush_catalog_vision.api.openapi import OPENAPI_SPEC, SWAGGER_UI_HTML
 
 
 def log_backend(message):
@@ -87,17 +89,36 @@ def build_request_handler(dependencies):
             self.end_headers()
             self.wfile.write(body)
 
+        def _send_html(self, html, status=200):
+            """Write an HTML response with the provided HTTP status."""
+            body = html.encode("utf-8")
+            self.send_response(status)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
         def do_GET(self):
-            """Reject GET requests because the backend exposes POST endpoints only."""
+            """Serve API documentation and reject unsupported GET requests."""
+            path = urlparse(self.path).path
+            if path == "/swagger.json":
+                self._send_json(OPENAPI_SPEC)
+                return
+
+            if path in {"/docs", "/swagger"}:
+                self._send_html(SWAGGER_UI_HTML)
+                return
+
             self._send_json({"error": "Method not allowed. Use POST to /identify."}, status=405)
 
         def do_POST(self):
             """Dispatch supported POST endpoints and validate request bodies."""
-            if self.path == "/location":
+            path = urlparse(self.path).path
+            if path == "/location":
                 self._handle_location_lookup()
                 return
 
-            if self.path != "/identify":
+            if path != "/identify":
                 self._send_json({"error": "Endpoint not found."}, status=404)
                 return
 

@@ -46,6 +46,34 @@ class TestServerIntegration:
         response = requests.get(f"{server_url}/identify")
         assert response.status_code == 405
 
+    def test_swagger_json_serves_openapi_document(self, server_url):
+        """Test that /swagger.json returns the OpenAPI document."""
+        response = requests.get(f"{server_url}/swagger.json")
+
+        assert response.status_code == 200
+        assert response.headers["Content-Type"].startswith("application/json")
+        data = response.json()
+        assert data["openapi"] == "3.0.3"
+        assert data["info"]["title"] == "Crush Catalog Vision API"
+        assert "/identify" in data["paths"]
+        assert "/location" in data["paths"]
+
+    def test_docs_serves_swagger_ui(self, server_url):
+        """Test that /docs returns a Swagger UI page."""
+        response = requests.get(f"{server_url}/docs")
+
+        assert response.status_code == 200
+        assert response.headers["Content-Type"].startswith("text/html")
+        assert "SwaggerUIBundle" in response.text
+        assert "/swagger.json" in response.text
+
+    def test_swagger_alias_serves_swagger_ui(self, server_url):
+        """Test that /swagger also returns the Swagger UI page."""
+        response = requests.get(f"{server_url}/swagger")
+
+        assert response.status_code == 200
+        assert "SwaggerUIBundle" in response.text
+
     def test_identify_endpoint_wrong_content_type(self, server_url):
         """Test that /identify rejects JSON."""
         payload = {"ebird_token": "test"}
