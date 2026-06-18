@@ -1,0 +1,6 @@
+{
+    "Lua.workspace.library": [
+        "/Users/jasondentler/.vscode/extensions/murayama-photo.lightroom-sdk-types-1.0.0/types"
+    ],
+    "stylua.targetReleaseVersion": "latest"
+}
