@@ -5,6 +5,7 @@ return {
     LrPluginInfoUrl = "https://github.com/jasondentler/crush-catalog",
 
     LrPluginInfoProvider = "InfoProvider.lua",
+    LrMetadataProvider = "MetadataProvider.lua",
 
     VERSION = {
         major = 0,

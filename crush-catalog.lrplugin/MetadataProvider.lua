@@ -1,0 +1,68 @@
+return {
+    metadataFieldsForPhotos = {
+        {
+            id = "detectionCount",
+            title = "Detections",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "commonNames",
+            title = "Common",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "scientificNames",
+            title = "Scientific",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "suggestedCount",
+            title = "Suggested",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "localSpeciesCount",
+            title = "Local",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "manualCount",
+            title = "Manual",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "notBirdCount",
+            title = "Not Animal",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "unsureCount",
+            title = "Unsure",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+        {
+            id = "topSuggestionConfidence",
+            title = "Top Conf %",
+            dataType = "string",
+            searchable = true,
+            browsable = true,
+        },
+    },
+    schemaVersion = 1,
+}
