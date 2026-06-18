@@ -40,4 +40,4 @@ This project incorporates the following third-party library:
   - **Compliance:** The original copyright notice, web-page links, and `AUTHOR_NOTE` string are maintained within the source file located at `crush-catalog.lrplugin/JSON.lua`.
 
 ---
-*This plugin is not affiliated with or endorsed by Adobe, Cornell University, eBird, or iNaturalist.*
+*This plugin is not affiliated with or endorsed by Adobe or iNaturalist.*

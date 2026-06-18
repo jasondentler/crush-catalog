@@ -4,6 +4,8 @@ return {
     LrPluginName = LOC "$$$/CrushCatalog/PluginName=Crush Catalog",
     LrPluginInfoUrl = "https://github.com/jasondentler/crush-catalog",
 
+    LrPluginInfoProvider = "InfoProvider.lua",
+
     VERSION = {
         major = 0,
         minor = 0,
