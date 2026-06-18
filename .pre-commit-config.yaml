@@ -24,6 +24,13 @@ repos:
 
   - repo: local
     hooks:
+      - id: lua-lint
+        name: Lua lint
+        entry: make lint
+        language: system
+        pass_filenames: false
+        files: '(\.lua|\.rockspec|Makefile|\.luacheckrc)$'
+
       - id: lua-tests
         name: Lua tests
         entry: make test

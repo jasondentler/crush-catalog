@@ -29,6 +29,12 @@ Run the Busted test suite:
 make test
 ```
 
+Run the Lua linter:
+
+```sh
+make lint
+```
+
 Run all pre-commit hooks manually:
 
 ```sh
@@ -93,6 +99,7 @@ If adding third-party code or assets, update `NOTICE.txt` and document the licen
 
 Before opening a pull request:
 
+- Run `make lint`.
 - Run `make test`.
 - Add or update Busted specs for behavior changes.
 - Keep changes focused on the issue being solved.

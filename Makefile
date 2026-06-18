@@ -1,4 +1,4 @@
-.PHONY: commit commit-deps hooks pre-commit test test-deps
+.PHONY: all commit commit-deps hooks lint pre-commit test test-deps
 
 LUA_DIR ?= /opt/homebrew/opt/luajit
 LUA_VERSION ?= 5.1
@@ -7,11 +7,16 @@ UV ?= uv
 UV_CACHE_DIR ?= .uv-cache
 PRE_COMMIT_HOME ?= .pre-commit-cache
 
+all: lint test
+
 test-deps:
 	$(LUAROCKS) make --tree .lua_modules --only-deps crush-catalog-scm-1.rockspec
 
 test:
 	.lua_modules/bin/busted tests
+
+lint:
+	.lua_modules/bin/luacheck crush-catalog.lrplugin tests crush-catalog-scm-1.rockspec
 
 commit-deps:
 	UV_CACHE_DIR=$(UV_CACHE_DIR) $(UV) sync --group dev
