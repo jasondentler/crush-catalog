@@ -1,0 +1,32 @@
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+
+repos:
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.4.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args:
+          - --strict
+          - feat
+          - fix
+          - docs
+          - style
+          - refactor
+          - perf
+          - test
+          - build
+          - ci
+          - chore
+          - revert
+
+  - repo: local
+    hooks:
+      - id: lua-tests
+        name: Lua tests
+        entry: make test
+        language: system
+        pass_filenames: false
+        files: '(\.lua|\.rockspec|Makefile)$'

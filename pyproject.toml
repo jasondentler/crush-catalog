@@ -1,0 +1,20 @@
+[project]
+name = "crush-catalog"
+version = "0.0.1"
+requires-python = ">=3.10"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "commitizen>=4.8.0",
+    "conventional-pre-commit==4.4.0",
+    "pre-commit>=4.2.0",
+]
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.0.1"
+version_scheme = "semver"
+tag_format = "v$version"
+major_version_zero = true
+update_changelog_on_bump = true

@@ -1,0 +1,4 @@
+.lua_modules/
+.venv/
+.uv-cache/
+.pre-commit-cache/
