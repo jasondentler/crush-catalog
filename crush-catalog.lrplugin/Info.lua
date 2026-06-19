@@ -6,6 +6,12 @@ return {
 
     LrPluginInfoProvider = "InfoProvider.lua",
     LrMetadataProvider = "MetadataProvider.lua",
+    LrLibraryMenuItems = {
+        {
+            title = LOC "$$$/CrushCatalog/IdentifySelected=Identify Species",
+            file = "IdentifySelectedPhotosTask.lua",
+        },
+    },
 
     VERSION = {
         major = 0,

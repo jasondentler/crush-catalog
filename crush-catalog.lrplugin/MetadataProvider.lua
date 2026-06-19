@@ -1,13 +1,6 @@
 return {
     metadataFieldsForPhotos = {
         {
-            id = "detectionCount",
-            title = "Detections",
-            dataType = "string",
-            searchable = true,
-            browsable = true,
-        },
-        {
             id = "commonNames",
             title = "Common",
             dataType = "string",
@@ -22,39 +15,41 @@ return {
             browsable = true,
         },
         {
-            id = "suggestedCount",
-            title = "Suggested",
+            id = "detectionCount",
+            version = 2,
+            title = "Detected Animals",
             dataType = "string",
-            searchable = true,
-            browsable = true,
+            searchable = false,
+            browsable = false,
         },
         {
-            id = "localSpeciesCount",
-            title = "Local",
+            id = "topSuggestionCount",
+            title = "Top Suggestion Count",
             dataType = "string",
-            searchable = true,
-            browsable = true,
+            searchable = false,
+            browsable = false
         },
         {
-            id = "manualCount",
-            title = "Manual",
+            id = "otherSuggestionCount",
+            title = "Other Suggestion Count",
             dataType = "string",
-            searchable = true,
-            browsable = true,
-        },
-        {
-            id = "notBirdCount",
-            title = "Not Animal",
-            dataType = "string",
-            searchable = true,
-            browsable = true,
+            searchable = false,
+            browsable = false
         },
         {
             id = "unsureCount",
-            title = "Unsure",
+            version = 2,
+            title = "Unsure Count",
             dataType = "string",
-            searchable = true,
-            browsable = true,
+            searchable = false,
+            browsable = false
+        },
+        {
+            id = "detectionFalsePositivesCount",
+            title = "Detection False Positives",
+            dataType = "string",
+            searchable = false,
+            browsable = false
         },
         {
             id = "topSuggestionConfidence",
@@ -64,5 +59,5 @@ return {
             browsable = true,
         },
     },
-    schemaVersion = 1,
+    schemaVersion = 2,
 }
