@@ -1,7 +1,29 @@
 local WildCatalogIdentify = {}
 
-local function stripTrailingSlash(value)
-    return (value:gsub('/+$', ''))
+local DEFAULT_BASE_URL = 'http://localhost:8000'
+
+local function trim(value)
+    if value == nil then
+        return ''
+    end
+
+    return tostring(value):match('^%s*(.-)%s*$') or ''
+end
+
+local function normalizeBaseUrl(value)
+    local baseUrl = trim(value)
+
+    if baseUrl == '' then
+        baseUrl = DEFAULT_BASE_URL
+    end
+
+    baseUrl = baseUrl:gsub('/+$', '')
+
+    if baseUrl:lower():sub(-9) == '/identify' then
+        baseUrl = baseUrl:sub(1, -10)
+    end
+
+    return baseUrl
 end
 
 function WildCatalogIdentify.buildPayload(options)
@@ -41,7 +63,7 @@ function WildCatalogIdentify.buildRequest(imagePath, options, json)
 
     options = options or {}
 
-    local baseUrl = stripTrailingSlash(options.baseUrl or 'http://localhost:8000')
+    local baseUrl = normalizeBaseUrl(options.baseUrl)
     local payload = WildCatalogIdentify.buildPayload(options)
 
     return {

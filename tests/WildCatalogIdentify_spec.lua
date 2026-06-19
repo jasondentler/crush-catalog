@@ -30,6 +30,26 @@ describe('WildCatalogIdentify', function()
         assert.are.equal('multipart/mixed', request.headers[1].value)
     end)
 
+    it('normalizes base URLs with or without trailing slashes', function()
+        local withoutTrailingSlash = Identify.buildRequest('/tmp/source.jpg', {
+            baseUrl = 'http://localhost:8000',
+        }, JSON)
+        local withTrailingSlash = Identify.buildRequest('/tmp/source.jpg', {
+            baseUrl = 'http://localhost:8000/',
+        }, JSON)
+
+        assert.are.equal('http://localhost:8000/identify', withoutTrailingSlash.url)
+        assert.are.equal('http://localhost:8000/identify', withTrailingSlash.url)
+    end)
+
+    it('normalizes legacy backend URLs that include the identify endpoint', function()
+        local request = Identify.buildRequest('/tmp/source.jpg', {
+            baseUrl = 'http://localhost:8000/identify/',
+        }, JSON)
+
+        assert.are.equal('http://localhost:8000/identify', request.url)
+    end)
+
     it('parses multipart identify responses with JPEG detections', function()
         local body = table.concat({
             '--abc',

@@ -2,7 +2,7 @@ local LrView = import("LrView")
 local LrPrefs = import("LrPrefs")
 
 local prefs = LrPrefs.prefsForPlugin()
-local DEFAULT_BACKEND_URL = "http://localhost:8000/identify"
+local DEFAULT_BACKEND_URL = "http://localhost:8000"
 
 local function trim(s)
 	if s == nil then
@@ -25,8 +25,8 @@ return {
 				f:static_text({
 					title = LOC(
 						"$$$/CrushCatalog/InfoProvider/BackendUrl/Instructions="
-							.. "Enter the backend URL for animal identification. Always use HTTPS for remote backends "
-							.. "to protect your privacy."
+							.. "Where is Wild Catalog running? Usually leave this setting unchanged. "
+							.. "Use HTTPS if it runs on another computer or server."
 					),
 					width = 520,
 					height = 42,
@@ -36,7 +36,7 @@ return {
 					spacing = f:control_spacing(),
 					bind_to_object = propertyTable,
 					f:static_text({
-						title = LOC("$$$/CrushCatalog/InfoProvider/BackendUrl/Label=Backend URL:"),
+						title = LOC("$$$/CrushCatalog/InfoProvider/BackendUrl/Label=Wild Catalog address:"),
 					}),
 					f:edit_field({
 						value = LrView.bind("backendUrl"),
@@ -44,7 +44,7 @@ return {
 						immediate = true,
 						tooltip = LOC(
 							"$$$/CrushCatalog/InfoProvider/BackendUrl/Tooltip="
-								.. "Enter the HTTP or HTTPS endpoint for the Wild Catalog identification backend."
+								.. "Enter the address where the Wild Catalog service is running."
 						),
 					}),
 				}),

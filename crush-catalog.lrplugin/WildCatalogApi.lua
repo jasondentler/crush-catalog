@@ -1,3 +1,5 @@
+local LrPrefs = import 'LrPrefs'
+
 local WildCatalogApi = {}
 
 WildCatalogApi.DEFAULT_BASE_URL = 'http://localhost:8000'
@@ -15,6 +17,25 @@ local JSON = assert(loadfile(pluginPath() .. '/JSON.lua'))()
 local Http = assert(loadfile(pluginPath() .. '/Http.lua'))()
 local Identify = assert(loadfile(pluginPath() .. '/Core/WildCatalogIdentify.lua'))()
 
+local function trim(value)
+    if value == nil then
+        return ''
+    end
+
+    return tostring(value):match('^%s*(.-)%s*$') or ''
+end
+
+local function configuredBaseUrl()
+    local prefs = LrPrefs.prefsForPlugin()
+    local backendUrl = trim(prefs.backendUrl)
+
+    if backendUrl ~= '' then
+        return backendUrl
+    end
+
+    return WildCatalogApi.DEFAULT_BASE_URL
+end
+
 function WildCatalogApi.identify(imagePath, options)
     local effectiveOptions = {}
 
@@ -22,7 +43,7 @@ function WildCatalogApi.identify(imagePath, options)
         effectiveOptions[key] = value
     end
 
-    effectiveOptions.baseUrl = effectiveOptions.baseUrl or WildCatalogApi.DEFAULT_BASE_URL
+    effectiveOptions.baseUrl = effectiveOptions.baseUrl or configuredBaseUrl()
 
     local request = Identify.buildRequest(imagePath, effectiveOptions, JSON)
     local response = Http.postMultipart(request.url, request.parts, request.headers)

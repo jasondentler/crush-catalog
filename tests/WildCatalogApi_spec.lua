@@ -1,10 +1,19 @@
-local function loadWildCatalogApi(lrHttp)
+local function loadWildCatalogApi(lrHttp, prefs)
     _G._PLUGIN = {
         path = 'crush-catalog.lrplugin',
     }
     _G.import = function(name)
-        assert.are.equal('LrHttp', name)
-        return lrHttp
+        if name == 'LrHttp' then
+            return lrHttp
+        elseif name == 'LrPrefs' then
+            return {
+                prefsForPlugin = function()
+                    return prefs or {}
+                end,
+            }
+        end
+
+        error('Unexpected Lightroom import: ' .. tostring(name))
     end
 
     return assert(loadfile('crush-catalog.lrplugin/WildCatalogApi.lua'))()
@@ -53,5 +62,24 @@ describe('WildCatalogApi', function()
         assert.are.equal('multipart/mixed', capturedHeaders[1].value)
         assert.same({}, response.result.results)
         assert.same({}, response.detectedImages)
+    end)
+
+    it('uses the configured Lightroom backend URL when no base URL is provided', function()
+        local capturedUrl
+        local api = loadWildCatalogApi({
+            postMultipart = function(url)
+                capturedUrl = url
+
+                return '{"results":[]}', {
+                    { field = 'Content-Type', value = 'application/json' },
+                }
+            end,
+        }, {
+            backendUrl = 'http://example.test:9000/',
+        })
+
+        api.identify('/tmp/source.jpg')
+
+        assert.are.equal('http://example.test:9000/identify', capturedUrl)
     end)
 end)
