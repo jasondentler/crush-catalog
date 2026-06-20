@@ -30,6 +30,7 @@ describe('IdentifySelectedPhotosTask', function()
         local dialogAction = 'continue'
         local protectedCalls = 0
         local recordCalls = {}
+        local traceCalls = {}
         local selectedPhotos
         local task
         local progress = {
@@ -85,6 +86,15 @@ describe('IdentifySelectedPhotosTask', function()
         end
 
         package.loaded.WildCatalogApi = {
+            JSON = {
+                encode = function(_, value)
+                    if value.action ~= nil then
+                        return 'dialog:' .. value.action
+                    end
+
+                    return 'backend-response'
+                end,
+            },
             identify = function(path, options)
                 identifyCalls[#identifyCalls + 1] = { path = path, options = options }
                 return {
@@ -110,6 +120,9 @@ describe('IdentifySelectedPhotosTask', function()
                     photo = selectedPhoto,
                     dispositions = dispositions,
                 }
+            end,
+            trace = function(message)
+                traceCalls[#traceCalls + 1] = message
             end,
         }
 
@@ -170,6 +183,10 @@ describe('IdentifySelectedPhotosTask', function()
         assert.are.equal(3, protectedCalls)
         assert.are.equal(photo, recordCalls[1].photo)
         assert.are.equal('confirmed', recordCalls[1].dispositions[1].disposition)
+        assert.same({
+            'Backend API response JSON for bird.jpg: backend-response',
+            'Dialog result JSON for bird.jpg: dialog:continue',
+        }, traceCalls)
 
         dialogAction = 'next_image'
         identifyCalls = {}

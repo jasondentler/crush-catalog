@@ -56,27 +56,61 @@ describe('PhotoMetadata', function()
         )
     end)
 
-    it('records string values inside a private catalog write gate', function()
+    it('records metadata and keywords inside their required catalog write gates', function()
         local originalPlugin = _G._PLUGIN
         local plugin = { id = 'test-plugin' }
         local written = {}
+        local privateWriteGateEntered = false
         local writeGateEntered = false
+        local writeActions = {}
+        local keywords = {}
         local photo = {
             catalog = {
                 withPrivateWriteAccessDo = function(catalog, callback)
                     assert.is_not_nil(catalog)
+                    privateWriteGateEntered = true
+                    callback()
+                    privateWriteGateEntered = false
+                end,
+                withWriteAccessDo = function(catalog, actionName, callback)
+                    assert.is_not_nil(catalog)
+                    writeActions[#writeActions + 1] = actionName
+                    assert.is_false(privateWriteGateEntered)
                     writeGateEntered = true
                     callback()
+                    writeGateEntered = false
                     return 'executed'
+                end,
+                createKeyword = function(_, name, synonyms, _, parent)
+                    assert.is_true(writeGateEntered)
+                    local key = tostring(parent) .. '/' .. name
+                    local value = keywords[key]
+
+                    if value == nil then
+                        value = { name = name, synonyms = synonyms, parent = parent }
+                        function value:getSynonyms() return self.synonyms end
+                        function value:setAttributes(attributes)
+                            self.synonyms = attributes.synonyms
+                        end
+                        keywords[key] = value
+                    end
+
+                    return value
                 end,
             },
         }
 
         function photo:setPropertyForPlugin(receivedPlugin, fieldId, value)
-            assert.is_true(writeGateEntered)
+            assert.is_true(privateWriteGateEntered)
+            assert.is_false(writeGateEntered)
             assert.are.equal(photo, self)
             assert.are.equal(plugin, receivedPlugin)
             written[fieldId] = value
+        end
+
+        function photo.addKeyword()
+            assert.is_true(writeGateEntered)
+            assert.is_false(privateWriteGateEntered)
         end
 
         _G._PLUGIN = plugin
@@ -96,6 +130,10 @@ describe('PhotoMetadata', function()
         _G._PLUGIN = originalPlugin
 
         assert.are.equal('executed', status)
+        assert.same({
+            'Apply Crush Catalog keywords',
+            'Update Crush Catalog synonyms',
+        }, writeActions)
         assert.are.equal(2, summary.detectionCount)
         assert.same({
             commonNames = 'Fox Squirrel',

@@ -52,6 +52,24 @@ local function appendFailure(failures, metadata, failure)
         .. ': ' .. tostring(failure)
 end
 
+local function traceJson(label, value)
+    if type(PhotoMetadata.trace) ~= 'function' then
+        return
+    end
+
+    local encoded, json = pcall(
+        WildCatalogApi.JSON.encode,
+        WildCatalogApi.JSON,
+        value
+    )
+
+    if encoded then
+        PhotoMetadata.trace(label .. ': ' .. json)
+    else
+        PhotoMetadata.trace(label .. ' could not be encoded: ' .. tostring(json))
+    end
+end
+
 local function showFailures(failures)
     if #failures > 0 then
         LrDialogs.message(
@@ -95,6 +113,11 @@ local function identifySelectedPhotos()
         })
 
         if succeeded then
+            traceJson(
+                'Backend API response JSON for '
+                    .. (metadata.originalFilename or metadata.path or '<unknown>'),
+                response.result
+            )
             local processed, action, dispositions = LrTasks.pcall(
                 IdentificationDialog.showForResponse,
                 photo,
@@ -104,6 +127,14 @@ local function identifySelectedPhotos()
             )
 
             if processed then
+                traceJson(
+                    'Dialog result JSON for '
+                        .. (metadata.originalFilename or metadata.path or '<unknown>'),
+                    {
+                        action = action,
+                        dispositions = dispositions or {},
+                    }
+                )
                 stop = action == 'stop'
 
                 if action == 'continue' then
