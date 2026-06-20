@@ -8,8 +8,12 @@ return {
     LrMetadataProvider = "MetadataProvider.lua",
     LrLibraryMenuItems = {
         {
-            title = LOC "$$$/CrushCatalog/IdentifySelected=Identify Species",
+            title = LOC "$$$/CrushCatalog/IdentifySelected=Identify species",
             file = "IdentifySelectedPhotosTask.lua",
+        },
+        {
+            title = LOC "$$$/CrushCatalog/ClearSelected=Clear from selected photo(s)",
+            file = "ClearSelectedPhotosTask.lua",
         },
     },
 

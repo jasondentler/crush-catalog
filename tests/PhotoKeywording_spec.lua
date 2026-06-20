@@ -247,4 +247,29 @@ describe('PhotoKeywording', function()
             'Crush Catalog > Common Names > Old Bird',
         }, photo.removed)
     end)
+
+    it('clears only existing Crush Catalog keyword assignments', function()
+        local catalog, photo = fixture()
+
+        local function existingKeyword(name, path, parent)
+            local value = { name = name, path = path, parent = parent }
+            function value:getName() return self.name end
+            function value:getParent() return self.parent end
+            return value
+        end
+
+        local root = existingKeyword('Crush Catalog', 'Crush Catalog')
+        local child = existingKeyword('Animals', 'Crush Catalog > Animals', root)
+        local unrelatedRoot = existingKeyword('Places', 'Places')
+        local unrelated = existingKeyword('Texas', 'Places > Texas', unrelatedRoot)
+
+        function photo.getRawMetadata(_, key)
+            assert.are.equal('keywords', key)
+            return { child, unrelated }
+        end
+
+        assert.are.equal('executed', PhotoKeywording.clear(photo))
+        assert.same({ 30 }, catalog.writeTimeouts)
+        assert.same({ 'Crush Catalog > Animals' }, photo.removed)
+    end)
 end)

@@ -48,6 +48,24 @@ function PhotoMetadata.record(photo, detections, reprocessing)
     return summary, status
 end
 
+function PhotoMetadata.clear(photo)
+    PhotoKeywording.clear(photo)
+    PhotoKeywording.trace('Beginning private metadata clear')
+    local writeStatus = photo.catalog:withPrivateWriteAccessDo(function()
+        for _, fieldId in ipairs(FIELD_IDS) do
+            photo:setPropertyForPlugin(_PLUGIN, fieldId, nil)
+        end
+    end, { timeout = WRITE_TIMEOUT_SECONDS })
+
+    if writeStatus ~= 'executed' then
+        error('Private metadata clear timed out after '
+            .. tostring(WRITE_TIMEOUT_SECONDS) .. ' seconds')
+    end
+
+    PhotoKeywording.trace('Finished private metadata clear')
+    return writeStatus
+end
+
 function PhotoMetadata.summarize(detections)
     return PhotoMetadataLogic.summarize(detections, TaxonomyNames)
 end

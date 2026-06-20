@@ -163,4 +163,62 @@ describe('PhotoMetadata', function()
             topSuggestionConfidence = '36.5',
         }, written)
     end)
+
+    it('clears metadata and keywords inside their required catalog write gates', function()
+        local originalPlugin = _G._PLUGIN
+        local plugin = { id = 'test-plugin' }
+        local cleared = {}
+        local actions = {}
+        local privateWriteTimeout
+        local root = { name = 'Crush Catalog' }
+        local child = { name = 'Birds', parent = root }
+        local photo = {
+            catalog = {
+                withWriteAccessDo = function(_, action, callback)
+                    actions[#actions + 1] = action
+                    callback()
+                    return 'executed'
+                end,
+                withPrivateWriteAccessDo = function(_, callback, timeoutParams)
+                    privateWriteTimeout = timeoutParams.timeout
+                    callback()
+                    return 'executed'
+                end,
+            },
+        }
+        function root:getName() return self.name end
+        function root.getParent() return nil end
+        function child:getName() return self.name end
+        function child:getParent() return self.parent end
+        function photo.getRawMetadata(_, key)
+            assert.are.equal('keywords', key)
+            return { child }
+        end
+        function photo.removeKeyword(_, value)
+            assert.are.equal(child, value)
+        end
+        function photo.setPropertyForPlugin(_, receivedPlugin, fieldId, value)
+            assert.are.equal(plugin, receivedPlugin)
+            assert.is_nil(value)
+            cleared[#cleared + 1] = fieldId
+        end
+
+        _G._PLUGIN = plugin
+        local status = PhotoMetadata.clear(photo)
+        _G._PLUGIN = originalPlugin
+
+        assert.are.equal('executed', status)
+        assert.are.equal(30, privateWriteTimeout)
+        assert.same({ 'Remove Crush Catalog keywords' }, actions)
+        assert.same({
+            'commonNames',
+            'scientificNames',
+            'detectionCount',
+            'topSuggestionCount',
+            'otherSuggestionCount',
+            'unsureCount',
+            'detectionFalsePositivesCount',
+            'topSuggestionConfidence',
+        }, cleared)
+    end)
 end)

@@ -491,6 +491,36 @@ function PhotoKeywording.record(photo, detections, reprocessing)
     return status
 end
 
+function PhotoKeywording.clear(photo)
+    local catalog = photo.catalog
+    local label = photoLabel(photo)
+    local existingKeywords = existingCrushCatalogKeywords(photo)
+
+    log('trace', 'Beginning keyword removal for ' .. label
+        .. '; existing Crush Catalog keywords=' .. tostring(#existingKeywords))
+    local removed, status = protectedCall(
+        catalog.withWriteAccessDo,
+        catalog,
+        'Remove Crush Catalog keywords',
+        function()
+            removeKeywords(photo, existingKeywords)
+        end,
+        { timeout = WRITE_TIMEOUT_SECONDS }
+    )
+
+    if not removed or status ~= 'executed' then
+        local message = 'Keyword removal transaction failed for ' .. label
+            .. ': ' .. (removed
+                and 'timed out after ' .. tostring(WRITE_TIMEOUT_SECONDS) .. ' seconds'
+                or tostring(status))
+        log('error', message)
+        error(message)
+    end
+
+    log('trace', 'Finished keyword removal for ' .. label)
+    return status
+end
+
 function PhotoKeywording.trace(message)
     log('trace', message)
 end
