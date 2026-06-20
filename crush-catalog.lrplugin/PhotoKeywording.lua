@@ -1,5 +1,6 @@
 local PhotoKeywording = {}
 local ROOT_KEYWORDS = {}
+local WRITE_TIMEOUT_SECONDS = 30
 
 local logger
 local protectedCall = pcall
@@ -448,12 +449,15 @@ function PhotoKeywording.record(photo, detections, reprocessing)
         function()
             removeKeywords(photo, existingKeywords)
             synonymUpdates = createAndAttach(photo, detections)
-        end
+        end,
+        { timeout = WRITE_TIMEOUT_SECONDS }
     )
 
-    if not created then
+    if not created or creationStatus ~= 'executed' then
         local message = 'Keyword creation transaction failed for ' .. label
-            .. ': ' .. tostring(creationStatus)
+            .. ': ' .. (created
+                and 'timed out after ' .. tostring(WRITE_TIMEOUT_SECONDS) .. ' seconds'
+                or tostring(creationStatus))
         log('error', message)
         error(message)
     end
@@ -470,12 +474,15 @@ function PhotoKeywording.record(photo, detections, reprocessing)
             for _, update in ipairs(synonymUpdates) do
                 ensureSynonyms(update.keyword, update.synonyms)
             end
-        end
+        end,
+        { timeout = WRITE_TIMEOUT_SECONDS }
     )
 
-    if not updated then
+    if not updated or status ~= 'executed' then
         local message = 'Synonym update transaction failed for ' .. label
-            .. ': ' .. tostring(status)
+            .. ': ' .. (updated
+                and 'timed out after ' .. tostring(WRITE_TIMEOUT_SECONDS) .. ' seconds'
+                or tostring(status))
         log('error', message)
         error(message)
     end

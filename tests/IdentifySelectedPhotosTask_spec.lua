@@ -34,6 +34,8 @@ describe('IdentifySelectedPhotosTask', function()
         local dialogAction = 'continue'
         local protectedCalls = 0
         local recordCalls = {}
+        local recordsToFail = 0
+        local messages = {}
         local traceCalls = {}
         local selectedPhotos
         local task
@@ -141,6 +143,11 @@ describe('IdentifySelectedPhotosTask', function()
                     dispositions = dispositions,
                     reprocessing = reprocessing,
                 }
+
+                if recordsToFail > 0 then
+                    recordsToFail = recordsToFail - 1
+                    error('write timeout')
+                end
             end,
             trace = function(message)
                 traceCalls[#traceCalls + 1] = message
@@ -158,7 +165,11 @@ describe('IdentifySelectedPhotosTask', function()
                         }
                     end,
                 },
-                LrDialogs = { message = function() end },
+                LrDialogs = {
+                    message = function(title, message)
+                        messages[#messages + 1] = { title = title, message = message }
+                    end,
+                },
                 LrLocalization = { currentLanguage = function() return 'en-US' end },
                 LrProgressScope = function() return progress end,
                 LrTasks = {
@@ -234,6 +245,16 @@ describe('IdentifySelectedPhotosTask', function()
         assert.are.equal(1, #recordCalls)
 
         batchOptions.reprocess = true
+        dialogAction = 'continue'
+        identifyCalls = {}
+        recordCalls = {}
+        recordsToFail = 1
+        selectedPhotos = { photo, photo }
+        component.identifySelectedPhotos()
+        assert.are.equal(2, #identifyCalls)
+        assert.are.equal(2, #recordCalls)
+        assert.matches('write timeout', messages[#messages].message)
+
         dialogAction = 'stop'
         identifyCalls = {}
         selectedPhotos = { photo, photo }

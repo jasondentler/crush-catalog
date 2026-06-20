@@ -74,16 +74,19 @@ describe('PhotoMetadata', function()
         local plugin = { id = 'test-plugin' }
         local written = {}
         local privateWriteGateEntered = false
+        local privateWriteTimeout
         local writeGateEntered = false
         local writeActions = {}
         local keywords = {}
         local photo = {
             catalog = {
-                withPrivateWriteAccessDo = function(catalog, callback)
+                withPrivateWriteAccessDo = function(catalog, callback, timeoutParams)
                     assert.is_not_nil(catalog)
+                    privateWriteTimeout = timeoutParams.timeout
                     privateWriteGateEntered = true
                     callback()
                     privateWriteGateEntered = false
+                    return 'executed'
                 end,
                 withWriteAccessDo = function(catalog, actionName, callback)
                     assert.is_not_nil(catalog)
@@ -143,6 +146,7 @@ describe('PhotoMetadata', function()
         _G._PLUGIN = originalPlugin
 
         assert.are.equal('executed', status)
+        assert.are.equal(30, privateWriteTimeout)
         assert.same({
             'Apply Crush Catalog keywords',
             'Update Crush Catalog synonyms',

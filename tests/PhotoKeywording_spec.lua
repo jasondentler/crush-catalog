@@ -4,10 +4,16 @@ describe('PhotoKeywording', function()
     )()
 
     local function fixture()
-        local catalog = { keywords = {}, createCalls = {}, writeGeneration = 0 }
+        local catalog = {
+            keywords = {},
+            createCalls = {},
+            writeGeneration = 0,
+            writeTimeouts = {},
+        }
         local photo = { catalog = catalog, added = {}, removed = {} }
 
-        function catalog:withWriteAccessDo(_, callback)
+        function catalog:withWriteAccessDo(_, callback, timeoutParams)
+            self.writeTimeouts[#self.writeTimeouts + 1] = timeoutParams.timeout
             self.writeGeneration = self.writeGeneration + 1
             callback()
             return 'executed'
@@ -94,6 +100,7 @@ describe('PhotoKeywording', function()
         } }
 
         PhotoKeywording.record(photo, detections)
+        assert.same({ 30, 30 }, catalog.writeTimeouts)
 
         assert.is_not_nil(catalog.keywords['Crush Catalog > All'])
         assert.is_not_nil(catalog.keywords[
