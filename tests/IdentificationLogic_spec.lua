@@ -43,10 +43,11 @@ describe('IdentificationLogic', function()
         assert.are.equal('confirmed', confirmed.disposition)
         assert.are.equal(1, confirmed.selectedPredictionIndex)
         assert.are.equal(0.9, confirmed.selectedPrediction.confidence)
+        assert.same({ 0.9 }, confirmed.predictionConfidences)
         assert.same(prediction.taxonomy, confirmed.selectedPrediction.taxonomy)
-        assert.same(
-            { disposition = 'unsure' },
-            IdentificationLogic.disposition({ action = 'unsure' }, {})
-        )
+        assert.same({
+            disposition = 'unsure',
+            predictionConfidences = {},
+        }, IdentificationLogic.disposition({ action = 'unsure' }, {}))
     end)
 end)

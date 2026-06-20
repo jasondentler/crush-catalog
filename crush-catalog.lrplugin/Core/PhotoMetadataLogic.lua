@@ -31,12 +31,13 @@ local function alphabetical(left, right)
 end
 
 function PhotoMetadataLogic.summarize(detections, taxonomyNames)
+    detections = detections or {}
     local commonNames = {}
     local commonNamesSeen = {}
     local scientificNames = {}
     local scientificNamesSeen = {}
     local summary = {
-        detectionCount = #(detections or {}),
+        detectionCount = #detections,
         topSuggestionCount = 0,
         otherSuggestionCount = 0,
         unsureCount = 0,
@@ -44,11 +45,19 @@ function PhotoMetadataLogic.summarize(detections, taxonomyNames)
         taxonomies = {},
         commonNameTaxonomies = {},
     }
-    local topConfidence
+    local topConfidence = #detections > 0 and 0 or nil
 
-    for _, detection in ipairs(detections or {}) do
+    for _, detection in ipairs(detections) do
         local prediction = detection.selectedPrediction
         local predictionIndex = detection.selectedPredictionIndex
+
+        for _, value in ipairs(detection.predictionConfidences or {}) do
+            local confidence = tonumber(value)
+
+            if confidence ~= nil and confidence > topConfidence then
+                topConfidence = confidence
+            end
+        end
 
         if detection.disposition == 'unsure' then
             summary.unsureCount = summary.unsureCount + 1
@@ -74,10 +83,12 @@ function PhotoMetadataLogic.summarize(detections, taxonomyNames)
                 summary.otherSuggestionCount = summary.otherSuggestionCount + 1
             end
 
-            local confidence = tonumber(prediction.confidence)
+            if detection.predictionConfidences == nil then
+                local confidence = tonumber(prediction.confidence)
 
-            if confidence ~= nil and (topConfidence == nil or confidence > topConfidence) then
-                topConfidence = confidence
+                if confidence ~= nil and confidence > topConfidence then
+                    topConfidence = confidence
+                end
             end
         end
     end

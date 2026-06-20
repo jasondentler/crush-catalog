@@ -8,6 +8,7 @@ describe('PhotoMetadata', function()
     it('summarizes confirmed predictions and preserves their taxonomies', function()
         local summary = PhotoMetadataLogic.summarize({
             {
+                predictionConfidences = { 0.99, 0.75, 0.5 },
                 selectedPredictionIndex = 2,
                 selectedPrediction = {
                     commonName = 'Fox Squirrel',
@@ -48,12 +49,24 @@ describe('PhotoMetadata', function()
         assert.are.equal(1, summary.otherSuggestionCount)
         assert.are.equal(1, summary.unsureCount)
         assert.are.equal(1, summary.detectionFalsePositivesCount)
-        assert.are.equal('98.2', summary.topSuggestionConfidence)
+        assert.are.equal('99.0', summary.topSuggestionConfidence)
         assert.same({ 'Animalia', 'Sciurus', 'niger' }, summary.taxonomies[1])
         assert.same(
             { 'Animals', 'Thrushes', 'American Robin' },
             summary.commonNameTaxonomies[2]
         )
+    end)
+
+    it('sets confidence to zero for detections without predictions', function()
+        local summary = PhotoMetadataLogic.summarize({
+            { disposition = 'unsure', predictionConfidences = {} },
+        }, TaxonomyNames)
+
+        assert.are.equal('0.0', summary.topSuggestionConfidence)
+        assert.are.equal('', PhotoMetadataLogic.summarize(
+            {},
+            TaxonomyNames
+        ).topSuggestionConfidence)
     end)
 
     it('records metadata and keywords inside their required catalog write gates', function()

@@ -1,5 +1,15 @@
 local IdentificationLogic = {}
 
+local function predictionConfidences(result)
+    local confidences = {}
+
+    for _, prediction in ipairs(result.predictions or {}) do
+        confidences[#confidences + 1] = prediction.confidence
+    end
+
+    return confidences
+end
+
 function IdentificationLogic.predictionItems(predictions, noPredictionsTitle, taxonomyNames)
     local items = {}
 
@@ -28,16 +38,22 @@ function IdentificationLogic.predictionItems(predictions, noPredictionsTitle, ta
 end
 
 function IdentificationLogic.disposition(dialogResult, result)
+    local confidences = predictionConfidences(result)
+
     if dialogResult.action == 'ok' then
         local predictionIndex = dialogResult.selectedPredictionIndex
         local prediction = (result.predictions or {})[predictionIndex]
 
         if prediction == nil then
-            return { disposition = 'confirmed' }
+            return {
+                disposition = 'confirmed',
+                predictionConfidences = confidences,
+            }
         end
 
         return {
             disposition = 'confirmed',
+            predictionConfidences = confidences,
             selectedPredictionIndex = predictionIndex,
             selectedPrediction = {
                 confidence = prediction.confidence,
@@ -48,7 +64,10 @@ function IdentificationLogic.disposition(dialogResult, result)
         }
     end
 
-    return { disposition = dialogResult.action }
+    return {
+        disposition = dialogResult.action,
+        predictionConfidences = confidences,
+    }
 end
 
 return IdentificationLogic

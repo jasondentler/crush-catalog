@@ -27,12 +27,15 @@ describe('AutomaticModesLogic', function()
 
     it('confirms the top prediction at the threshold and is unsure below it', function()
         local confirmed = logic.automaticDisposition(result(0.9), 90)
-        local unsure = logic.automaticDisposition(result(0.899), 90)
+        local unsureResult = result(0.899)
+        unsureResult.predictions[2] = { confidence = 0.5 }
+        local unsure = logic.automaticDisposition(unsureResult, 90)
 
         assert.are.equal('confirmed', confirmed.disposition)
         assert.are.equal(1, confirmed.selectedPredictionIndex)
         assert.are.equal('Common Raven', confirmed.selectedPrediction.commonNameTaxonomy[3])
         assert.are.equal('unsure', unsure.disposition)
+        assert.same({ 0.899, 0.5 }, unsure.predictionConfidences)
         assert.are.equal('unsure', logic.automaticDisposition({ predictions = {} }, 90).disposition)
     end)
 

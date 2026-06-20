@@ -48,7 +48,7 @@ function AutomaticModesLogic.automaticDisposition(result, threshold)
         }, result)
     end
 
-    return { disposition = 'unsure' }
+    return IdentificationLogic.disposition({ action = 'unsure' }, result)
 end
 
 function AutomaticModesLogic.shouldShowManual(result, options)
