@@ -255,6 +255,88 @@ local function attach(photo, attached, value)
     end
 end
 
+local function keywordName(keywordValue)
+    local succeeded, value = protectedCall(
+        keywordValue.getName,
+        keywordValue
+    )
+
+    if not succeeded then
+        error('Could not read Crush Catalog keyword name: ' .. tostring(value))
+    end
+
+    return value
+end
+
+
+local function keywordParent(keywordValue)
+    local succeeded, value = protectedCall(
+        keywordValue.getParent,
+        keywordValue
+    )
+
+    if not succeeded then
+        error('Could not read Crush Catalog keyword parent: ' .. tostring(value))
+    end
+
+    return value
+end
+
+
+local function belongsToCrushCatalog(keywordValue)
+    local current = keywordValue
+
+    while current ~= nil do
+        local parent = keywordParent(current)
+
+        if parent == nil then
+            return keywordName(current) == 'Crush Catalog'
+        end
+
+        current = parent
+    end
+
+    return false
+end
+
+
+local function existingCrushCatalogKeywords(photo)
+    local succeeded, keywords = protectedCall(
+        photo.getRawMetadata,
+        photo,
+        'keywords'
+    )
+
+    if not succeeded then
+        error('Could not read keywords for ' .. photoLabel(photo)
+            .. ': ' .. tostring(keywords))
+    end
+
+    local existing = {}
+
+    for _, value in ipairs(keywords or {}) do
+        if belongsToCrushCatalog(value) then
+            existing[#existing + 1] = value
+        end
+    end
+
+    return existing
+end
+
+
+local function removeKeywords(photo, keywords)
+    for _, value in ipairs(keywords) do
+        log('trace', 'Removing keyword ' .. tostring(value)
+            .. ' from photo ' .. photoLabel(photo))
+        local succeeded, message = protectedCall(photo.removeKeyword, photo, value)
+
+        if not succeeded then
+            error('Could not remove Crush Catalog keyword from '
+                .. photoLabel(photo) .. ': ' .. tostring(message))
+        end
+    end
+end
+
 local function createAndAttach(photo, detections)
     local catalog = photo.catalog
     local keywordCache = {}
@@ -349,17 +431,22 @@ local function createAndAttach(photo, detections)
     return synonymUpdates
 end
 
-function PhotoKeywording.record(photo, detections)
+function PhotoKeywording.record(photo, detections, reprocessing)
     local catalog = photo.catalog
     local synonymUpdates
     local label = photoLabel(photo)
+    local existingKeywords = reprocessing
+        and existingCrushCatalogKeywords(photo)
+        or {}
 
-    log('trace', 'Beginning keyword creation for ' .. label)
+    log('trace', 'Beginning keyword creation for ' .. label
+        .. '; existing Crush Catalog keywords=' .. tostring(#existingKeywords))
     local created, creationStatus = protectedCall(
         catalog.withWriteAccessDo,
         catalog,
         'Apply Crush Catalog keywords',
         function()
+            removeKeywords(photo, existingKeywords)
             synonymUpdates = createAndAttach(photo, detections)
         end
     )

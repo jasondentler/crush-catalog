@@ -1,6 +1,7 @@
 describe('IdentifySelectedPhotosTask', function()
     local originalImport
     local originalApi
+    local originalAutomaticModesDialog
     local originalDialog
     local originalLoc
     local originalPhotoMetadata
@@ -8,6 +9,7 @@ describe('IdentifySelectedPhotosTask', function()
     before_each(function()
         originalImport = _G.import
         originalApi = package.loaded.WildCatalogApi
+        originalAutomaticModesDialog = package.loaded.AutomaticModesDialog
         originalDialog = package.loaded.IdentificationDialog
         originalPhotoMetadata = package.loaded.PhotoMetadata
         originalLoc = _G.LOC
@@ -19,6 +21,7 @@ describe('IdentifySelectedPhotosTask', function()
     after_each(function()
         _G.import = originalImport
         package.loaded.WildCatalogApi = originalApi
+        package.loaded.AutomaticModesDialog = originalAutomaticModesDialog
         package.loaded.IdentificationDialog = originalDialog
         package.loaded.PhotoMetadata = originalPhotoMetadata
         _G.LOC = originalLoc
@@ -26,6 +29,7 @@ describe('IdentifySelectedPhotosTask', function()
 
     it('identifies each selected photo with its Lightroom metadata', function()
         local identifyCalls = {}
+        local batchOptions = { mode = 'manual', threshold = 90, reprocess = true }
         local dialogCalls = {}
         local dialogAction = 'continue'
         local protectedCalls = 0
@@ -57,6 +61,10 @@ describe('IdentifySelectedPhotosTask', function()
         function photo:getFormattedMetadata(key)
             self.requestedFormattedKeys[#self.requestedFormattedKeys + 1] = key
             return self.formatted[key]
+        end
+
+        function photo:getPropertyForPlugin(_, key)
+            return self.pluginMetadata and self.pluginMetadata[key]
         end
 
         selectedPhotos = { photo }
@@ -104,21 +112,34 @@ describe('IdentifySelectedPhotosTask', function()
             end,
         }
         package.loaded.IdentificationDialog = {
-            showForResponse = function(selectedPhoto, response, imageIndex, imageCount)
+            showForResponse = function(
+                selectedPhoto,
+                response,
+                imageIndex,
+                imageCount,
+                options
+            )
                 dialogCalls[#dialogCalls + 1] = {
                     photo = selectedPhoto,
                     response = response,
                     imageIndex = imageIndex,
                     imageCount = imageCount,
+                    options = options,
                 }
                 return dialogAction, { { disposition = 'confirmed' } }
             end,
         }
+        package.loaded.AutomaticModesDialog = {
+            show = function()
+                return batchOptions
+            end,
+        }
         package.loaded.PhotoMetadata = {
-            record = function(selectedPhoto, dispositions)
+            record = function(selectedPhoto, dispositions, reprocessing)
                 recordCalls[#recordCalls + 1] = {
                     photo = selectedPhoto,
                     dispositions = dispositions,
+                    reprocessing = reprocessing,
                 }
             end,
             trace = function(message)
@@ -180,21 +201,39 @@ describe('IdentifySelectedPhotosTask', function()
         assert.are.equal(photo, dialogCalls[1].photo)
         assert.are.equal(1, dialogCalls[1].imageIndex)
         assert.are.equal(1, dialogCalls[1].imageCount)
+        assert.are.equal('manual', dialogCalls[1].options.mode)
         assert.are.equal(3, protectedCalls)
         assert.are.equal(photo, recordCalls[1].photo)
         assert.are.equal('confirmed', recordCalls[1].dispositions[1].disposition)
+        assert.is_false(recordCalls[1].reprocessing)
         assert.same({
+            'Beginning identification; selected photos=1',
+            'Using manual mode for single-photo selection',
+            'Photos eligible for identification=1',
             'Backend API response JSON for bird.jpg: backend-response',
             'Dialog result JSON for bird.jpg: dialog:continue',
+            'Finished identification; failures=0',
         }, traceCalls)
 
-        dialogAction = 'next_image'
+        batchOptions = nil
         identifyCalls = {}
         selectedPhotos = { photo, photo }
+        component.identifySelectedPhotos()
+        assert.are.equal(0, #identifyCalls)
+
+        batchOptions = { mode = 'assisted', threshold = 90, reprocess = false }
+        photo.pluginMetadata = { detectionCount = '1', unsureCount = '0' }
+        component.identifySelectedPhotos()
+        assert.are.equal(0, #identifyCalls)
+
+        photo.pluginMetadata.unsureCount = '1'
+        dialogAction = 'next_image'
+        identifyCalls = {}
         component.identifySelectedPhotos()
         assert.are.equal(2, #identifyCalls)
         assert.are.equal(1, #recordCalls)
 
+        batchOptions.reprocess = true
         dialogAction = 'stop'
         identifyCalls = {}
         selectedPhotos = { photo, photo }

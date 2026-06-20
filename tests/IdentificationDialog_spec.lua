@@ -205,4 +205,49 @@ describe('IdentificationDialog', function()
         assert.are.equal('not_an_animal', dispositions[3].disposition)
     end)
 
+    it('automatically dispositions high and low confidence detections', function()
+        local dialogCount = 0
+        local photo = { getFormattedMetadata = function() return 'bird.jpg' end }
+
+        _G.import = function(name)
+            local imports = {
+                LrBinding = { makePropertyTable = function() return {} end },
+                LrDialogs = {
+                    presentModalDialog = function()
+                        dialogCount = dialogCount + 1
+                        return 'ok'
+                    end,
+                },
+                LrFileUtils = {},
+                LrFunctionContext = {},
+                LrPathUtils = {},
+                LrView = {},
+            }
+            return assert(imports[name])
+        end
+
+        local dialog = assert(loadfile(
+            'crush-catalog.lrplugin/IdentificationDialog.lua'
+        ))()
+        local response = {
+            result = { results = {
+                { predictions = { { confidence = 0.9 } } },
+                { predictions = { { confidence = 0.899 } } },
+            } },
+            detectedImages = { {}, {} },
+        }
+        local action, dispositions = dialog.showForResponse(
+            photo,
+            response,
+            1,
+            1,
+            { mode = 'automatic', threshold = 90 }
+        )
+
+        assert.are.equal('continue', action)
+        assert.are.equal('confirmed', dispositions[1].disposition)
+        assert.are.equal('unsure', dispositions[2].disposition)
+        assert.are.equal(0, dialogCount)
+    end)
+
 end)

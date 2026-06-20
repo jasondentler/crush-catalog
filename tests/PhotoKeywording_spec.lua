@@ -5,7 +5,7 @@ describe('PhotoKeywording', function()
 
     local function fixture()
         local catalog = { keywords = {}, createCalls = {}, writeGeneration = 0 }
-        local photo = { catalog = catalog, added = {} }
+        local photo = { catalog = catalog, added = {}, removed = {} }
 
         function catalog:withWriteAccessDo(_, callback)
             self.writeGeneration = self.writeGeneration + 1
@@ -65,6 +65,10 @@ describe('PhotoKeywording', function()
 
         function photo:addKeyword(keyword)
             self.added[#self.added + 1] = keyword.path
+        end
+
+        function photo:removeKeyword(keyword)
+            self.removed[#self.removed + 1] = keyword.path
         end
 
         return catalog, photo
@@ -197,5 +201,43 @@ describe('PhotoKeywording', function()
         assert.is_not_nil(catalog.keywords[
             'Crush Catalog > Scientific Names > Animalia > Ardea > alba'
         ])
+    end)
+
+    it('removes existing Crush Catalog assignments when reprocessing', function()
+        local _, photo = fixture()
+
+        local function existingKeyword(name, path, parent)
+            local value = { name = name, path = path, parent = parent }
+            function value:getName() return self.name end
+            function value:getParent() return self.parent end
+            return value
+        end
+
+        local root = existingKeyword('Crush Catalog', 'Crush Catalog')
+        local common = existingKeyword(
+            'Common Names',
+            'Crush Catalog > Common Names',
+            root
+        )
+        local bird = existingKeyword(
+            'Old Bird',
+            'Crush Catalog > Common Names > Old Bird',
+            common
+        )
+        local unrelatedRoot = existingKeyword('Places', 'Places')
+        local unrelated = existingKeyword('Texas', 'Places > Texas', unrelatedRoot)
+
+        function photo.getRawMetadata(_, key)
+            assert.are.equal('keywords', key)
+            return { root, common, bird, unrelated }
+        end
+
+        PhotoKeywording.record(photo, {}, true)
+
+        assert.same({
+            'Crush Catalog',
+            'Crush Catalog > Common Names',
+            'Crush Catalog > Common Names > Old Bird',
+        }, photo.removed)
     end)
 end)

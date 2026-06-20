@@ -26,7 +26,7 @@ local FIELD_IDS = {
     'topSuggestionConfidence',
 }
 
-function PhotoMetadata.record(photo, detections)
+function PhotoMetadata.record(photo, detections, reprocessing)
     local summary = PhotoMetadataLogic.summarize(detections, TaxonomyNames)
     local values = PhotoMetadataLogic.metadataValues(summary)
     PhotoKeywording.trace('Beginning private metadata write')
@@ -36,7 +36,7 @@ function PhotoMetadata.record(photo, detections)
         end
     end)
     PhotoKeywording.trace('Finished private metadata write')
-    local status = PhotoKeywording.record(photo, detections)
+    local status = PhotoKeywording.record(photo, detections, reprocessing)
 
     return summary, status
 end

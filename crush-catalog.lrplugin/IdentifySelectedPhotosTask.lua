@@ -4,9 +4,29 @@ local LrLocalization = import 'LrLocalization'
 local LrProgressScope = import 'LrProgressScope'
 local LrTasks = import 'LrTasks'
 
+local AutomaticModesDialog = require 'AutomaticModesDialog'
 local IdentificationDialog = require 'IdentificationDialog'
 local PhotoMetadata = require 'PhotoMetadata'
 local WildCatalogApi = require 'WildCatalogApi'
+
+local function pluginPath()
+    if _PLUGIN ~= nil and _PLUGIN.path ~= nil then
+        return _PLUGIN.path
+    end
+
+    local source = debug.getinfo(1, 'S').source
+    return source:match('^@(.+)/[^/]+$') or '.'
+end
+
+local AutomaticModesLogic = assert(
+    loadfile(pluginPath() .. '/Core/AutomaticModesLogic.lua')
+)()
+
+local function trace(message)
+    if type(PhotoMetadata.trace) == 'function' then
+        PhotoMetadata.trace(message)
+    end
+end
 
 local function firstAvailableMetadata(photo, accessor, keys)
     for _, key in ipairs(keys) do
@@ -47,9 +67,16 @@ local function metadataForPhoto(photo)
     }
 end
 
+local function hasCrushCatalogMetadata(photo)
+    local detectionCount = photo:getPropertyForPlugin(_PLUGIN, 'detectionCount')
+    return detectionCount ~= nil and detectionCount ~= ''
+end
+
 local function appendFailure(failures, metadata, failure)
-    failures[#failures + 1] = (metadata.originalFilename or metadata.path or '<unknown>')
+    local message = (metadata.originalFilename or metadata.path or '<unknown>')
         .. ': ' .. tostring(failure)
+    failures[#failures + 1] = message
+    trace('Identification failure: ' .. message)
 end
 
 local function traceJson(label, value)
@@ -92,11 +119,61 @@ end
 
 local function identifySelectedPhotos()
     local photos = LrApplication.activeCatalog():getTargetPhotos()
+    local options = { mode = 'manual', threshold = 90, reprocess = true }
+    trace('Beginning identification; selected photos=' .. tostring(#photos))
+
+    if #photos > 1 then
+        options = AutomaticModesDialog.show()
+
+        if options == nil then
+            trace('Identification canceled in automatic modes dialog')
+            return
+        end
+
+        trace('Automatic modes options: mode=' .. tostring(options.mode)
+            .. ', threshold=' .. tostring(options.threshold)
+            .. ', reprocess=' .. tostring(options.reprocess))
+
+        local eligible = {}
+
+        for _, photo in ipairs(photos) do
+            local label = firstAvailableMetadata(
+                photo,
+                'getFormattedMetadata',
+                { 'preservedFileName', 'fileName' }
+            ) or tostring(photo)
+            local detectionCount = photo:getPropertyForPlugin(_PLUGIN, 'detectionCount')
+            local unsureCount = photo:getPropertyForPlugin(_PLUGIN, 'unsureCount')
+
+            local shouldProcess = AutomaticModesLogic.shouldProcess(
+                detectionCount ~= nil and detectionCount ~= '',
+                unsureCount,
+                options.reprocess
+            )
+
+            trace('Photo eligibility: photo=' .. label
+                .. ', detectionCount=' .. tostring(detectionCount)
+                .. ', unsureCount=' .. tostring(unsureCount)
+                .. ', process=' .. tostring(shouldProcess))
+
+            if shouldProcess then
+                eligible[#eligible + 1] = photo
+            end
+        end
+
+        photos = eligible
+    else
+        trace('Using manual mode for single-photo selection')
+    end
+
+    trace('Photos eligible for identification=' .. tostring(#photos))
+
     local progress = createProgress()
     local failures = {}
 
     for index, photo in ipairs(photos) do
         if progress:isCanceled() then
+            trace('Identification canceled from progress scope')
             break
         end
 
@@ -123,7 +200,8 @@ local function identifySelectedPhotos()
                 photo,
                 response,
                 index,
-                #photos
+                #photos,
+                options
             )
 
             if processed then
@@ -141,7 +219,8 @@ local function identifySelectedPhotos()
                     local recorded, recordError = LrTasks.pcall(
                         PhotoMetadata.record,
                         photo,
-                        dispositions
+                        dispositions,
+                        hasCrushCatalogMetadata(photo)
                     )
 
                     if not recorded then
@@ -165,6 +244,7 @@ local function identifySelectedPhotos()
 
     progress:done()
     showFailures(failures)
+    trace('Finished identification; failures=' .. tostring(#failures))
 end
 
 LrTasks.startAsyncTask(identifySelectedPhotos)

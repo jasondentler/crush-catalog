@@ -19,6 +19,9 @@ end
 local IdentificationLogic = assert(
     loadfile(pluginPath() .. '/Core/IdentificationLogic.lua')
 )()
+local AutomaticModesLogic = assert(
+    loadfile(pluginPath() .. '/Core/AutomaticModesLogic.lua')
+)()
 local TaxonomyNames = assert(loadfile(pluginPath() .. '/Core/TaxonomyNames.lua'))()
 
 function IdentificationDialog.predictionItems(predictions)
@@ -135,29 +138,41 @@ local function show(photo, result, detectedImage, position)
     end)
 end
 
-function IdentificationDialog.showForResponse(photo, response, imageIndex, imageCount)
+function IdentificationDialog.showForResponse(photo, response, imageIndex, imageCount, options)
     local results = response.result.results or response.result
     local detectedImages = response.detectedImages or {}
     local dispositions = {}
+    options = options or { mode = 'manual' }
 
     for index, detectedImage in ipairs(detectedImages) do
         local result = results[index] or { predictions = {} }
-        local dialogResult = show(photo, result, detectedImage, {
-            imageIndex = imageIndex,
-            imageCount = imageCount,
-            detectionIndex = index,
-            detectionCount = #detectedImages,
-        })
+        local disposition
 
-        if dialogResult.action == 'other' then
-            return 'stop'
+        if AutomaticModesLogic.shouldShowManual(result, options) then
+            local dialogResult = show(photo, result, detectedImage, {
+                imageIndex = imageIndex,
+                imageCount = imageCount,
+                detectionIndex = index,
+                detectionCount = #detectedImages,
+            })
+
+            if dialogResult.action == 'other' then
+                return 'stop'
+            end
+
+            if dialogResult.action == 'cancel' then
+                return 'next_image'
+            end
+
+            disposition = IdentificationLogic.disposition(dialogResult, result)
+        else
+            disposition = AutomaticModesLogic.automaticDisposition(
+                result,
+                options.threshold
+            )
         end
 
-        if dialogResult.action == 'cancel' then
-            return 'next_image'
-        end
-
-        dispositions[#dispositions + 1] = IdentificationLogic.disposition(dialogResult, result)
+        dispositions[#dispositions + 1] = disposition
     end
 
     return 'continue', dispositions
