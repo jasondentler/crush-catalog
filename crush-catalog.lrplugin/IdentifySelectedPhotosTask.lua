@@ -1,4 +1,5 @@
 local LrApplication = import 'LrApplication'
+local LrDate = import 'LrDate'
 local LrDialogs = import 'LrDialogs'
 local LrLocalization = import 'LrLocalization'
 local LrProgressScope = import 'LrProgressScope'
@@ -117,6 +118,55 @@ local function createProgress()
     return progress
 end
 
+local function formatRemaining(seconds)
+    local totalMinutes = math.max(1, math.ceil(seconds / 60))
+    local hours = math.floor(totalMinutes / 60)
+    local minutes = totalMinutes % 60
+
+    if hours == 0 then
+        return string.format(
+            LOC '$$$/CrushCatalog/MinutesRemaining=%dm remaining',
+            minutes
+        )
+    end
+
+    if minutes == 0 then
+        return string.format(
+            LOC '$$$/CrushCatalog/HoursRemaining=%dh remaining',
+            hours
+        )
+    end
+
+    return string.format(
+        LOC '$$$/CrushCatalog/HoursMinutesRemaining=%dh %dm remaining',
+        hours,
+        minutes
+    )
+end
+
+local function estimateRemaining(durations, remaining)
+    if #durations == 0 then
+        return nil
+    end
+
+    local total = 0
+    local first = math.max(1, #durations - 9)
+
+    for index = first, #durations do
+        total = total + durations[index]
+    end
+
+    return total / (#durations - first + 1) * remaining
+end
+
+local function appendDuration(durations, duration)
+    durations[#durations + 1] = duration
+
+    if #durations > 10 then
+        table.remove(durations, 1)
+    end
+end
+
 local function identifySelectedPhotos()
     local photos = LrApplication.activeCatalog():getTargetPhotos()
     local options = { mode = 'manual', threshold = 90, reprocess = true }
@@ -170,6 +220,7 @@ local function identifySelectedPhotos()
 
     local progress = createProgress()
     local failures = {}
+    local recentDurations = {}
 
     for index, photo in ipairs(photos) do
         if progress:isCanceled() then
@@ -179,8 +230,26 @@ local function identifySelectedPhotos()
 
         local metadata = metadataForPhoto(photo)
         local stop = false
-        progress:setCaption(metadata.originalFilename or metadata.path or '')
+        local caption = string.format(
+            LOC '$$$/CrushCatalog/IdentifyProgressCaption=Identifying %s (%d of %d)',
+            metadata.originalFilename or metadata.path or '',
+            index,
+            #photos
+        )
+
+        if options.mode == 'automatic' then
+            local remaining = #photos - index + 1
+            local estimate = estimateRemaining(recentDurations, remaining)
+
+            if estimate ~= nil and estimate > 0 then
+                caption = caption .. ' - ' .. formatRemaining(estimate)
+            end
+        end
+
+        progress:setCaption(caption)
         progress:setPortionComplete(index - 1, #photos)
+        local imageStartedAt = options.mode == 'automatic'
+            and LrDate.currentTime() or nil
 
         local succeeded, response = LrTasks.pcall(WildCatalogApi.identify, metadata.path, {
             originalFilename = metadata.originalFilename,
@@ -234,6 +303,14 @@ local function identifySelectedPhotos()
             appendFailure(failures, metadata, response)
         end
 
+        if imageStartedAt ~= nil then
+            local duration = LrDate.currentTime() - imageStartedAt
+
+            if duration > 0 then
+                appendDuration(recentDurations, duration)
+            end
+        end
+
         progress:setPortionComplete(index, #photos)
 
         if stop then
@@ -250,6 +327,8 @@ end
 LrTasks.startAsyncTask(identifySelectedPhotos)
 
 return {
+    estimateRemaining = estimateRemaining,
+    formatRemaining = formatRemaining,
     identifySelectedPhotos = identifySelectedPhotos,
     metadataForPhoto = metadataForPhoto,
 }

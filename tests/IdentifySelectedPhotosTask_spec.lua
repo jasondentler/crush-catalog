@@ -39,6 +39,7 @@ describe('IdentifySelectedPhotosTask', function()
         local traceCalls = {}
         local selectedPhotos
         local task
+        local currentTime = 0
         local progress = {
             portions = {},
         }
@@ -170,6 +171,13 @@ describe('IdentifySelectedPhotosTask', function()
                         messages[#messages + 1] = { title = title, message = message }
                     end,
                 },
+                LrDate = {
+                    currentTime = function()
+                        local value = currentTime
+                        currentTime = currentTime + 900
+                        return value
+                    end,
+                },
                 LrLocalization = { currentLanguage = function() return 'en-US' end },
                 LrProgressScope = function() return progress end,
                 LrTasks = {
@@ -189,12 +197,20 @@ describe('IdentifySelectedPhotosTask', function()
         local component = assert(
             loadfile('crush-catalog.lrplugin/IdentifySelectedPhotosTask.lua')
         )()
+        assert.are.equal('15m remaining', component.formatRemaining(15 * 60))
+        assert.are.equal('1h 2m remaining', component.formatRemaining(62 * 60))
+        assert.are.equal(300, component.estimateRemaining({ 60, 90 }, 4))
+        assert.are.equal(60, component.estimateRemaining({
+            3600,
+            60, 60, 60, 60, 60,
+            60, 60, 60, 60, 60,
+        }, 1))
         task()
 
         assert.is_true(progress.cancelable)
         assert.is_true(progress.completed)
         assert.same({ { 0, 1 }, { 1, 1 } }, progress.portions)
-        assert.are.equal('bird.jpg', progress.caption)
+        assert.are.equal('Identifying bird.jpg (1 of 1)', progress.caption)
         assert.are.equal('/photos/bird-renamed.jpg', identifyCalls[1].path)
         assert.are.equal('bird.jpg', identifyCalls[1].options.originalFilename)
         assert.are.equal('2026-05-01T12:30:00Z', identifyCalls[1].options.exifOverride.captured_at)
@@ -242,6 +258,7 @@ describe('IdentifySelectedPhotosTask', function()
         identifyCalls = {}
         component.identifySelectedPhotos()
         assert.are.equal(2, #identifyCalls)
+        assert.are.equal('Identifying bird.jpg (2 of 2)', progress.caption)
         assert.is_true(identifyCalls[1].options.return_detected_images)
         assert.are.equal(1, #recordCalls)
 
@@ -249,6 +266,7 @@ describe('IdentifySelectedPhotosTask', function()
         identifyCalls = {}
         component.identifySelectedPhotos()
         assert.are.equal(2, #identifyCalls)
+        assert.are.equal('Identifying bird.jpg (2 of 2) - 15m remaining', progress.caption)
         assert.is_false(identifyCalls[1].options.return_detected_images)
 
         batchOptions.reprocess = true
