@@ -242,7 +242,14 @@ describe('IdentifySelectedPhotosTask', function()
         identifyCalls = {}
         component.identifySelectedPhotos()
         assert.are.equal(2, #identifyCalls)
+        assert.is_true(identifyCalls[1].options.return_detected_images)
         assert.are.equal(1, #recordCalls)
+
+        batchOptions.mode = 'automatic'
+        identifyCalls = {}
+        component.identifySelectedPhotos()
+        assert.are.equal(2, #identifyCalls)
+        assert.is_false(identifyCalls[1].options.return_detected_images)
 
         batchOptions.reprocess = true
         dialogAction = 'continue'

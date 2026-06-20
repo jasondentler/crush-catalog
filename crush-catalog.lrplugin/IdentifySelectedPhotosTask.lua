@@ -185,7 +185,7 @@ local function identifySelectedPhotos()
         local succeeded, response = LrTasks.pcall(WildCatalogApi.identify, metadata.path, {
             originalFilename = metadata.originalFilename,
             exifOverride = metadata.exifOverride,
-            return_detected_images = true,
+            return_detected_images = options.mode ~= 'automatic',
             common_name_language = LrLocalization.currentLanguage(),
         })
 

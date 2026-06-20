@@ -234,7 +234,7 @@ describe('IdentificationDialog', function()
                 { predictions = { { confidence = 0.9 } } },
                 { predictions = { { confidence = 0.899 } } },
             } },
-            detectedImages = { {}, {} },
+            detectedImages = {},
         }
         local action, dispositions = dialog.showForResponse(
             photo,

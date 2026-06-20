@@ -53,6 +53,12 @@ function WildCatalogIdentify.buildPayload(options)
         payload.common_name_language = options.common_name_language
     end
 
+    if options.returnDetectedImages ~= nil then
+        payload.return_detected_images = options.returnDetectedImages
+    elseif options.return_detected_images ~= nil then
+        payload.return_detected_images = options.return_detected_images
+    end
+
     return payload
 end
 

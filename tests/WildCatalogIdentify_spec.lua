@@ -42,6 +42,15 @@ describe('WildCatalogIdentify', function()
         assert.are.equal('http://localhost:8000/identify', withTrailingSlash.url)
     end)
 
+    it('can omit detected images from the response', function()
+        local request = Identify.buildRequest('/tmp/source.jpg', {
+            return_detected_images = false,
+        }, JSON)
+        local payload = JSON:decode(request.parts[2].value)
+
+        assert.is_false(payload.return_detected_images)
+    end)
+
     it('normalizes legacy backend URLs that include the identify endpoint', function()
         local request = Identify.buildRequest('/tmp/source.jpg', {
             baseUrl = 'http://localhost:8000/identify/',

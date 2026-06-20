@@ -144,16 +144,21 @@ function IdentificationDialog.showForResponse(photo, response, imageIndex, image
     local dispositions = {}
     options = options or { mode = 'manual' }
 
-    for index, detectedImage in ipairs(detectedImages) do
-        local result = results[index] or { predictions = {} }
+    for index, result in ipairs(results) do
         local disposition
 
         if AutomaticModesLogic.shouldShowManual(result, options) then
+            local detectedImage = detectedImages[index]
+
+            if detectedImage == nil then
+                error('Wild Catalog response is missing detected image ' .. index)
+            end
+
             local dialogResult = show(photo, result, detectedImage, {
                 imageIndex = imageIndex,
                 imageCount = imageCount,
                 detectionIndex = index,
-                detectionCount = #detectedImages,
+                detectionCount = #results,
             })
 
             if dialogResult.action == 'other' then
