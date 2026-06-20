@@ -13,7 +13,7 @@ describe('AutomaticModesDialog', function()
         _G.LOC = originalLoc
     end)
 
-    it('uses assisted mode, 90 percent, and no reprocessing by default', function()
+    it('uses assisted mode, 90 percent, and only new images by default', function()
         local presented
         local properties = {}
 
@@ -38,10 +38,10 @@ describe('AutomaticModesDialog', function()
                     bind = function(key) return { key = key } end,
                     osFactory = function()
                         return {
-                            checkbox = control,
                             column = control,
                             control_spacing = function() return 4 end,
                             edit_field = control,
+                            group_box = control,
                             radio_button = control,
                             row = control,
                             static_text = control,
@@ -59,9 +59,19 @@ describe('AutomaticModesDialog', function()
 
         assert.are.equal('assisted', options.mode)
         assert.are.equal(90, options.threshold)
-        assert.is_false(options.reprocess)
+        assert.are.equal('new', options.processingScope)
         assert.is_true(properties.valid)
         assert.are.equal('Okay', presented.actionVerb)
         assert.are.equal('valid', presented.actionBinding.enabled.key)
+        assert.are.equal('Images to Process', presented.contents[1].title)
+        assert.are.equal('Mode:', presented.contents[2].title)
+        assert.are.equal('<system>', presented.contents[1][1][1].font)
+        assert.are.equal('<system>', presented.contents[2][1][1].font)
+        assert.are.equal(
+            'Confidence Threshold:',
+            presented.contents[3][1].title
+        )
+        assert.are.equal('<system>', presented.contents[3][1].font)
+        assert.are.equal('threshold', presented.contents[3][2].value.key)
     end)
 end)

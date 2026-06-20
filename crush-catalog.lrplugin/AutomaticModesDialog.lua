@@ -24,7 +24,7 @@ function AutomaticModesDialog.show()
         local factory = LrView.osFactory()
 
         properties.threshold = '90'
-        properties.reprocess = false
+        properties.processingScope = 'new'
         properties.mode = 'assisted'
 
         local function updateValidity()
@@ -33,6 +33,7 @@ function AutomaticModesDialog.show()
 
         properties:addObserver('threshold', updateValidity)
         properties:addObserver('mode', updateValidity)
+        properties:addObserver('processingScope', updateValidity)
         updateValidity()
 
         local result = LrDialogs.presentModalDialog {
@@ -40,37 +41,67 @@ function AutomaticModesDialog.show()
             contents = factory:column {
                 spacing = factory:control_spacing(),
                 bind_to_object = properties,
+                factory:group_box {
+                    title = LOC '$$$/CrushCatalog/ImagesToProcess=Images to Process',
+                    fill_horizontal = 1,
+                    factory:column {
+                        factory:radio_button {
+                            title = LOC '$$$/CrushCatalog/OnlyNewImages=Only New images',
+                            font = '<system>',
+                            value = LrView.bind('processingScope'),
+                            checked_value = 'new',
+                        },
+                        factory:radio_button {
+                            title = LOC '$$$/CrushCatalog/NewAndUnsure=New + Unsure',
+                            font = '<system>',
+                            value = LrView.bind('processingScope'),
+                            checked_value = 'new_and_unsure',
+                        },
+                        factory:radio_button {
+                            title = LOC '$$$/CrushCatalog/ReprocessAllImages=Reprocess All Images',
+                            font = '<system>',
+                            value = LrView.bind('processingScope'),
+                            checked_value = 'all',
+                        },
+                    },
+                },
+                factory:group_box {
+                    title = LOC '$$$/CrushCatalog/Mode=Mode:',
+                    fill_horizontal = 1,
+                    factory:column {
+                        factory:radio_button {
+                            title = LOC '$$$/CrushCatalog/AutomaticMode=Automatic Mode',
+                            font = '<system>',
+                            value = LrView.bind('mode'),
+                            checked_value = 'automatic',
+                        },
+                        factory:radio_button {
+                            title = LOC '$$$/CrushCatalog/AssistedMode=Assisted Mode',
+                            font = '<system>',
+                            value = LrView.bind('mode'),
+                            checked_value = 'assisted',
+                        },
+                        factory:radio_button {
+                            title = LOC '$$$/CrushCatalog/ManualMode=Manual Mode',
+                            font = '<system>',
+                            value = LrView.bind('mode'),
+                            checked_value = 'manual',
+                        },
+                    },
+                },
                 factory:row {
                     factory:static_text {
                         title = LOC '$$$/CrushCatalog/ConfidenceThreshold=Confidence Threshold:',
+                        font = '<system>',
                     },
                     factory:edit_field {
                         value = LrView.bind('threshold'),
                         width_in_digits = 3,
                     },
-                    factory:static_text { title = '%' },
-                },
-                factory:checkbox {
-                    title = LOC '$$$/CrushCatalog/ReprocessImages=Reprocess Images',
-                    value = LrView.bind('reprocess'),
-                },
-                factory:static_text {
-                    title = LOC '$$$/CrushCatalog/Mode=Mode:',
-                },
-                factory:radio_button {
-                    title = LOC '$$$/CrushCatalog/AutomaticMode=Automatic Mode',
-                    value = LrView.bind('mode'),
-                    checked_value = 'automatic',
-                },
-                factory:radio_button {
-                    title = LOC '$$$/CrushCatalog/AssistedMode=Assisted Mode',
-                    value = LrView.bind('mode'),
-                    checked_value = 'assisted',
-                },
-                factory:radio_button {
-                    title = LOC '$$$/CrushCatalog/ManualMode=Manual Mode',
-                    value = LrView.bind('mode'),
-                    checked_value = 'manual',
+                    factory:static_text {
+                        title = '%',
+                        font = '<system>',
+                    },
                 },
             },
             actionVerb = LOC '$$$/CrushCatalog/Okay=Okay',
@@ -86,7 +117,7 @@ function AutomaticModesDialog.show()
 
         return {
             threshold = AutomaticModesLogic.threshold(properties.threshold),
-            reprocess = properties.reprocess,
+            processingScope = properties.processingScope,
             mode = properties.mode,
         }
     end)

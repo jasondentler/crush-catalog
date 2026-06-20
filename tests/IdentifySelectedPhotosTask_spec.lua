@@ -29,7 +29,7 @@ describe('IdentifySelectedPhotosTask', function()
 
     it('identifies each selected photo with its Lightroom metadata', function()
         local identifyCalls = {}
-        local batchOptions = { mode = 'manual', threshold = 90, reprocess = true }
+        local batchOptions = { mode = 'manual', threshold = 90, processingScope = 'all' }
         local dialogCalls = {}
         local dialogAction = 'continue'
         local protectedCalls = 0
@@ -248,11 +248,12 @@ describe('IdentifySelectedPhotosTask', function()
         component.identifySelectedPhotos()
         assert.are.equal(0, #identifyCalls)
 
-        batchOptions = { mode = 'assisted', threshold = 90, reprocess = false }
+        batchOptions = { mode = 'assisted', threshold = 90, processingScope = 'new' }
         photo.pluginMetadata = { detectionCount = '1', unsureCount = '0' }
         component.identifySelectedPhotos()
         assert.are.equal(0, #identifyCalls)
 
+        batchOptions.processingScope = 'new_and_unsure'
         photo.pluginMetadata.unsureCount = '1'
         dialogAction = 'next_image'
         identifyCalls = {}
@@ -269,7 +270,7 @@ describe('IdentifySelectedPhotosTask', function()
         assert.are.equal('Identifying bird.jpg (2 of 2) - 15m remaining', progress.caption)
         assert.is_false(identifyCalls[1].options.return_detected_images)
 
-        batchOptions.reprocess = true
+        batchOptions.processingScope = 'all'
         dialogAction = 'continue'
         identifyCalls = {}
         recordCalls = {}

@@ -19,10 +19,18 @@ describe('AutomaticModesLogic', function()
         assert.is_nil(logic.threshold('-1'))
         assert.is_nil(logic.threshold('101'))
         assert.is_nil(logic.threshold('nope'))
-        assert.is_true(logic.validOptions({ mode = 'assisted', threshold = '90' }))
-        assert.is_false(logic.validOptions({ mode = 'automatic', threshold = '' }))
-        assert.is_true(logic.validOptions({ mode = 'manual', threshold = '' }))
-        assert.is_false(logic.validOptions({ mode = 'unknown', threshold = '90' }))
+        local options = { mode = 'assisted', threshold = '90', processingScope = 'new' }
+        assert.is_true(logic.validOptions(options))
+        options.mode = 'automatic'
+        options.threshold = ''
+        assert.is_false(logic.validOptions(options))
+        options.mode = 'manual'
+        assert.is_true(logic.validOptions(options))
+        options.mode = 'unknown'
+        assert.is_false(logic.validOptions(options))
+        options.mode = 'manual'
+        options.processingScope = 'unknown'
+        assert.is_false(logic.validOptions(options))
     end)
 
     it('confirms the top prediction at the threshold and is unsure below it', function()
@@ -55,11 +63,15 @@ describe('AutomaticModesLogic', function()
         assert.is_true(logic.shouldShowManual(result(0.99), { mode = 'manual' }))
     end)
 
-    it('processes new, unsure, or explicitly reprocessed photos', function()
-        assert.is_true(logic.shouldProcess(false, nil, false))
-        assert.is_true(logic.shouldProcess(true, '2', false))
-        assert.is_false(logic.shouldProcess(true, '0', false))
-        assert.is_true(logic.shouldProcess(true, '0', true))
+    it('processes photos according to the selected processing scope', function()
+        assert.is_true(logic.shouldProcess(nil, nil, 'new'))
+        assert.is_true(logic.shouldProcess('', '0', 'new'))
+        assert.is_false(logic.shouldProcess('0', nil, 'new'))
+        assert.is_false(logic.shouldProcess('1', '2', 'new'))
+        assert.is_true(logic.shouldProcess(nil, nil, 'new_and_unsure'))
+        assert.is_true(logic.shouldProcess('0', '2', 'new_and_unsure'))
+        assert.is_false(logic.shouldProcess('0', '0', 'new_and_unsure'))
+        assert.is_true(logic.shouldProcess('0', '0', 'all'))
     end)
 
     it('resolves dependencies from the Lightroom plugin path', function()

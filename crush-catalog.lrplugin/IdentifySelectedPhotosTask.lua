@@ -169,7 +169,7 @@ end
 
 local function identifySelectedPhotos()
     local photos = LrApplication.activeCatalog():getTargetPhotos()
-    local options = { mode = 'manual', threshold = 90, reprocess = true }
+    local options = { mode = 'manual', threshold = 90, processingScope = 'all' }
     trace('Beginning identification; selected photos=' .. tostring(#photos))
 
     if #photos > 1 then
@@ -182,7 +182,7 @@ local function identifySelectedPhotos()
 
         trace('Automatic modes options: mode=' .. tostring(options.mode)
             .. ', threshold=' .. tostring(options.threshold)
-            .. ', reprocess=' .. tostring(options.reprocess))
+            .. ', processingScope=' .. tostring(options.processingScope))
 
         local eligible = {}
 
@@ -196,9 +196,9 @@ local function identifySelectedPhotos()
             local unsureCount = photo:getPropertyForPlugin(_PLUGIN, 'unsureCount')
 
             local shouldProcess = AutomaticModesLogic.shouldProcess(
-                detectionCount ~= nil and detectionCount ~= '',
+                detectionCount,
                 unsureCount,
-                options.reprocess
+                options.processingScope
             )
 
             trace('Photo eligibility: photo=' .. label

@@ -28,6 +28,9 @@ function AutomaticModesLogic.validOptions(options)
         or (options.mode ~= 'automatic'
             and options.mode ~= 'assisted'
             and options.mode ~= 'manual')
+        or (options.processingScope ~= 'new'
+            and options.processingScope ~= 'new_and_unsure'
+            and options.processingScope ~= 'all')
     then
         return false
     end
@@ -64,8 +67,18 @@ function AutomaticModesLogic.shouldShowManual(result, options)
         .disposition == 'unsure'
 end
 
-function AutomaticModesLogic.shouldProcess(hasMetadata, unsureCount, reprocess)
-    return reprocess or not hasMetadata or (tonumber(unsureCount) or 0) > 0
+function AutomaticModesLogic.shouldProcess(detectionCount, unsureCount, processingScope)
+    if processingScope == 'all' then
+        return true
+    end
+
+    local isNew = detectionCount == nil or detectionCount == ''
+
+    if processingScope == 'new_and_unsure' then
+        return isNew or (tonumber(unsureCount) or 0) > 0
+    end
+
+    return processingScope == 'new' and isNew
 end
 
 return AutomaticModesLogic
