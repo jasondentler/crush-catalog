@@ -5,6 +5,12 @@ local function loadWildCatalogApi(lrHttp, prefs)
     _G.import = function(name)
         if name == 'LrHttp' then
             return lrHttp
+        elseif name == 'LrFileUtils' then
+            return {
+                fileAttributes = function()
+                    return { fileSize = 12345 }
+                end,
+            }
         elseif name == 'LrPrefs' then
             return {
                 prefsForPlugin = function()
@@ -54,6 +60,7 @@ describe('WildCatalogApi', function()
         assert.are.equal('image', capturedParts[1].name)
         assert.are.equal('/tmp/source.jpg', capturedParts[1].filePath)
         assert.are.equal('source.jpg', capturedParts[1].fileName)
+        assert.are.equal(12345, capturedParts[1].fileSize)
         assert.are.equal('payload', capturedParts[2].name)
         assert.are.equal('application/json', capturedParts[2].contentType)
         assert.is_true(payload.return_detected_images)
