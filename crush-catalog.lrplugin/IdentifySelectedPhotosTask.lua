@@ -114,6 +114,7 @@ local function createProgress()
     }
 
     progress:setCancelable(true)
+    progress:setPausable(true)
 
     return progress
 end
@@ -164,6 +165,24 @@ local function appendDuration(durations, duration)
 
     if #durations > 10 then
         table.remove(durations, 1)
+    end
+end
+
+local function waitWhilePaused(progress)
+    local reportedPaused = false
+
+    while progress:isPaused() and not progress:isCanceled() do
+        if not reportedPaused then
+            progress:setCaption(LOC '$$$/CrushCatalog/IdentifyPaused=Identification paused')
+            trace('Identification paused')
+            reportedPaused = true
+        end
+
+        LrTasks.sleep(0.2)
+    end
+
+    if reportedPaused and not progress:isCanceled() then
+        trace('Identification resumed')
     end
 end
 
@@ -223,6 +242,8 @@ local function identifySelectedPhotos()
     local recentDurations = {}
 
     for index, photo in ipairs(photos) do
+        waitWhilePaused(progress)
+
         if progress:isCanceled() then
             trace('Identification canceled from progress scope')
             break
@@ -331,4 +352,5 @@ return {
     formatRemaining = formatRemaining,
     identifySelectedPhotos = identifySelectedPhotos,
     metadataForPhoto = metadataForPhoto,
+    waitWhilePaused = waitWhilePaused,
 }

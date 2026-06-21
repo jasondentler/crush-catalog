@@ -40,6 +40,7 @@ describe('IdentifySelectedPhotosTask', function()
         local selectedPhotos
         local task
         local currentTime = 0
+        local sleepCalls = 0
         local progress = {
             portions = {},
         }
@@ -76,8 +77,16 @@ describe('IdentifySelectedPhotosTask', function()
             self.cancelable = value
         end
 
+        function progress:setPausable(value)
+            self.pausable = value
+        end
+
         progress.isCanceled = function()
             return false
+        end
+
+        function progress:isPaused()
+            return self.paused or false
         end
 
         function progress:setCaption(value)
@@ -188,6 +197,10 @@ describe('IdentifySelectedPhotosTask', function()
                     startAsyncTask = function(callback)
                         task = callback
                     end,
+                    sleep = function()
+                        sleepCalls = sleepCalls + 1
+                        progress.paused = false
+                    end,
                 },
             }
 
@@ -208,6 +221,7 @@ describe('IdentifySelectedPhotosTask', function()
         task()
 
         assert.is_true(progress.cancelable)
+        assert.is_true(progress.pausable)
         assert.is_true(progress.completed)
         assert.same({ { 0, 1 }, { 1, 1 } }, progress.portions)
         assert.are.equal('Identifying bird.jpg (1 of 1)', progress.caption)
@@ -241,6 +255,13 @@ describe('IdentifySelectedPhotosTask', function()
             'Dialog result JSON for bird.jpg: dialog:continue',
             'Finished identification; failures=0',
         }, traceCalls)
+
+        progress.paused = true
+        component.waitWhilePaused(progress)
+        assert.are.equal(1, sleepCalls)
+        assert.are.equal('Identification paused', progress.caption)
+        assert.are.equal('Identification paused', traceCalls[#traceCalls - 1])
+        assert.are.equal('Identification resumed', traceCalls[#traceCalls])
 
         batchOptions = nil
         identifyCalls = {}
