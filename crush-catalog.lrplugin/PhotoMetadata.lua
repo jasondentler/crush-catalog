@@ -27,9 +27,7 @@ local FIELD_IDS = {
     'topSuggestionConfidence',
 }
 
-function PhotoMetadata.record(photo, detections, reprocessing)
-    local summary = PhotoMetadataLogic.summarize(detections, TaxonomyNames)
-    local values = PhotoMetadataLogic.metadataValues(summary)
+local function writeValues(photo, values)
     PhotoKeywording.trace('Beginning private metadata write')
     local writeStatus = photo.catalog:withPrivateWriteAccessDo(function()
         for _, fieldId in ipairs(FIELD_IDS) do
@@ -43,6 +41,13 @@ function PhotoMetadata.record(photo, detections, reprocessing)
     end
 
     PhotoKeywording.trace('Finished private metadata write')
+    return writeStatus
+end
+
+function PhotoMetadata.record(photo, detections, reprocessing)
+    local summary = PhotoMetadataLogic.summarize(detections, TaxonomyNames)
+    local values = PhotoMetadataLogic.metadataValues(summary)
+    writeValues(photo, values)
     local status = PhotoKeywording.record(photo, detections, reprocessing)
 
     return summary, status
@@ -50,20 +55,21 @@ end
 
 function PhotoMetadata.clear(photo)
     PhotoKeywording.clear(photo)
-    PhotoKeywording.trace('Beginning private metadata clear')
-    local writeStatus = photo.catalog:withPrivateWriteAccessDo(function()
-        for _, fieldId in ipairs(FIELD_IDS) do
-            photo:setPropertyForPlugin(_PLUGIN, fieldId, nil)
-        end
-    end, { timeout = WRITE_TIMEOUT_SECONDS })
+    return writeValues(photo, {})
+end
 
-    if writeStatus ~= 'executed' then
-        error('Private metadata clear timed out after '
-            .. tostring(WRITE_TIMEOUT_SECONDS) .. ' seconds')
+function PhotoMetadata.read(photo)
+    local values = {}
+
+    for _, fieldId in ipairs(FIELD_IDS) do
+        values[fieldId] = photo:getPropertyForPlugin(_PLUGIN, fieldId)
     end
 
-    PhotoKeywording.trace('Finished private metadata clear')
-    return writeStatus
+    return values
+end
+
+function PhotoMetadata.write(photo, values)
+    return writeValues(photo, values)
 end
 
 function PhotoMetadata.summarize(detections)
