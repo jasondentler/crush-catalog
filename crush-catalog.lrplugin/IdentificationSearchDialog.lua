@@ -146,7 +146,7 @@ function IdentificationSearchDialog.show(options)
                 factory:static_text {
                     title = LrView.bind('taxonomyTree'),
                     width = 520,
-                    height_in_lines = 10,
+                    height_in_lines = 14,
                 },
             },
             accessoryView = factory:row {

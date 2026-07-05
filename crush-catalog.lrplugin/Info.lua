@@ -12,6 +12,10 @@ return {
             file = "IdentifySelectedPhotosTask.lua",
         },
         {
+            title = LOC "$$$/CrushCatalog/AssignMultiple=Assign to multiple",
+            file = "AssignMultiplePhotosTask.lua",
+        },
+        {
             title = LOC "$$$/CrushCatalog/ExportSidecars=Back up identifications",
             file = "ExportSidecarsTask.lua",
         },
