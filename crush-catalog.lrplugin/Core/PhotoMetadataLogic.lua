@@ -40,6 +40,7 @@ function PhotoMetadataLogic.summarize(detections, taxonomyNames)
         detectionCount = #detections,
         topSuggestionCount = 0,
         otherSuggestionCount = 0,
+        manualCount = 0,
         unsureCount = 0,
         detectionFalsePositivesCount = 0,
         taxonomies = {},
@@ -61,11 +62,15 @@ function PhotoMetadataLogic.summarize(detections, taxonomyNames)
 
         if detection.disposition == 'unsure' then
             summary.unsureCount = summary.unsureCount + 1
+        elseif detection.disposition == 'manual' then
+            summary.manualCount = summary.manualCount + 1
         elseif detection.disposition == 'not_an_animal' then
             summary.detectionFalsePositivesCount = summary.detectionFalsePositivesCount + 1
         end
 
-        if prediction ~= nil and predictionIndex ~= nil then
+        if prediction ~= nil
+            and (predictionIndex ~= nil or detection.disposition == 'manual')
+        then
             addDistinct(commonNames, commonNamesSeen, taxonomyNames.commonName(prediction))
             addDistinct(
                 scientificNames,
@@ -77,10 +82,12 @@ function PhotoMetadataLogic.summarize(detections, taxonomyNames)
                 prediction.commonNameTaxonomy
             )
 
-            if predictionIndex == 1 then
-                summary.topSuggestionCount = summary.topSuggestionCount + 1
-            else
-                summary.otherSuggestionCount = summary.otherSuggestionCount + 1
+            if detection.disposition ~= 'manual' then
+                if predictionIndex == 1 then
+                    summary.topSuggestionCount = summary.topSuggestionCount + 1
+                else
+                    summary.otherSuggestionCount = summary.otherSuggestionCount + 1
+                end
             end
 
             if detection.predictionConfidences == nil then
@@ -111,6 +118,7 @@ function PhotoMetadataLogic.metadataValues(summary)
         detectionCount = tostring(summary.detectionCount),
         topSuggestionCount = tostring(summary.topSuggestionCount),
         otherSuggestionCount = tostring(summary.otherSuggestionCount),
+        manualCount = tostring(summary.manualCount),
         unsureCount = tostring(summary.unsureCount),
         detectionFalsePositivesCount = tostring(summary.detectionFalsePositivesCount),
         topSuggestionConfidence = summary.topSuggestionConfidence,

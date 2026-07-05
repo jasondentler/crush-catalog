@@ -22,6 +22,7 @@ local FIELD_IDS = {
     'detectionCount',
     'topSuggestionCount',
     'otherSuggestionCount',
+    'manualCount',
     'unsureCount',
     'detectionFalsePositivesCount',
     'topSuggestionConfidence',

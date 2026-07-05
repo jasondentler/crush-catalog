@@ -243,6 +243,11 @@ describe('IdentifySelectedPhotosTask', function()
         assert.are.equal(1, dialogCalls[1].imageIndex)
         assert.are.equal(1, dialogCalls[1].imageCount)
         assert.are.equal('manual', dialogCalls[1].options.mode)
+        assert.same(
+            { latitude = 29.573361, longitude = -94.389507 },
+            dialogCalls[1].options.gpsCoordinates
+        )
+        assert.are.equal('en-US', dialogCalls[1].options.commonNameLanguage)
         assert.are.equal(3, protectedCalls)
         assert.are.equal(photo, recordCalls[1].photo)
         assert.are.equal('confirmed', recordCalls[1].dispositions[1].disposition)

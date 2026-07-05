@@ -16,6 +16,7 @@ end
 local JSON = assert(loadfile(pluginPath() .. '/JSON.lua'))()
 local Http = assert(loadfile(pluginPath() .. '/Http.lua'))()
 local Identify = assert(loadfile(pluginPath() .. '/Core/WildCatalogIdentify.lua'))()
+local Search = assert(loadfile(pluginPath() .. '/Core/WildCatalogSearch.lua'))()
 
 local function trim(value)
     if value == nil then
@@ -51,8 +52,24 @@ function WildCatalogApi.identify(imagePath, options)
     return Identify.parseResponse(response, JSON, Http.logic)
 end
 
+function WildCatalogApi.search(query, options)
+    local effectiveOptions = {}
+
+    for key, value in pairs(options or {}) do
+        effectiveOptions[key] = value
+    end
+
+    effectiveOptions.baseUrl = effectiveOptions.baseUrl or configuredBaseUrl()
+
+    local request = Search.buildRequest(query, effectiveOptions)
+    local response = Http.get(request.url, request.headers)
+
+    return Search.parseResponse(response, JSON)
+end
+
 WildCatalogApi.JSON = JSON
 WildCatalogApi.Http = Http
 WildCatalogApi.Identify = Identify
+WildCatalogApi.Search = Search
 
 return WildCatalogApi

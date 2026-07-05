@@ -50,4 +50,26 @@ describe('IdentificationLogic', function()
             predictionConfidences = {},
         }, IdentificationLogic.disposition({ action = 'unsure' }, {}))
     end)
+
+    it('maps manual search results to manual dispositions', function()
+        local selectedPrediction = {
+            taxonomy = { 'Animalia', 'Eudocimus', 'albus' },
+            taxonomyRanks = { 'kingdom', 'genus', 'species' },
+            commonNameTaxonomy = { 'Animals', 'Ibises', 'White Ibis' },
+        }
+        local disposition = IdentificationLogic.disposition({
+            action = 'manual',
+            selectedPrediction = selectedPrediction,
+        }, {
+            predictions = {
+                { confidence = 0.95 },
+                { confidence = 0.75 },
+            },
+        })
+
+        assert.are.equal('manual', disposition.disposition)
+        assert.same({ 0.95, 0.75 }, disposition.predictionConfidences)
+        assert.same(selectedPrediction, disposition.selectedPrediction)
+        assert.is_nil(disposition.selectedPredictionIndex)
+    end)
 end)

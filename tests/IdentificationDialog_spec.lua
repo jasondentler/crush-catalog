@@ -29,7 +29,9 @@ describe('IdentificationDialog', function()
             local imports = {
                 LrBinding = {
                     makePropertyTable = function()
-                        return {}
+                        return {
+                            addObserver = function() end,
+                        }
                     end,
                 },
                 LrDialogs = {
@@ -65,6 +67,13 @@ describe('IdentificationDialog', function()
 
                         return result
                     end,
+                },
+                LrTasks = {
+                    pcall = function(...)
+                        return pcall(...)
+                    end,
+                    sleep = function() end,
+                    startAsyncTask = function(callback) callback() end,
                 },
                 LrPathUtils = {
                     child = function(parent, child)
@@ -145,6 +154,7 @@ describe('IdentificationDialog', function()
         assert.are.equal('Next Image', dialogs[1].accessoryView[3].title)
         assert.are.equal('Not An Animal', dialogs[1].accessoryView[4].title)
         assert.are.equal('Unsure', dialogs[1].accessoryView[5].title)
+        assert.are.equal('Not Listed', dialogs[1].accessoryView[6].title)
         dialogs[1].accessoryView[1].action({})
         assert.are.equal('other', stoppedResult)
         dialogs[1].accessoryView[3].action({})
@@ -205,6 +215,132 @@ describe('IdentificationDialog', function()
         assert.are.equal('not_an_animal', dispositions[3].disposition)
     end)
 
+    it('resolves a detection from the Not Listed child dialog', function()
+        local dialogs = {}
+        local modalResult
+        local manualPrediction = {
+            taxonomy = { 'Animalia', 'Eudocimus', 'albus' },
+            taxonomyRanks = { 'kingdom', 'genus', 'species' },
+            commonNameTaxonomy = { 'Animals', 'Ibises', 'White Ibis' },
+        }
+        local photo = {
+            getFormattedMetadata = function()
+                return 'bird.jpg'
+            end,
+        }
+
+        _G.import = function(name)
+            local imports = {
+                LrBinding = {
+                    makePropertyTable = function()
+                        return {
+                            addObserver = function() end,
+                        }
+                    end,
+                },
+                LrDialogs = {
+                    presentModalDialog = function(arguments)
+                        dialogs[#dialogs + 1] = arguments
+
+                        if arguments.title == 'Search' then
+                            local properties = arguments.contents.bind_to_object
+                            properties.searchResults = { manualPrediction }
+                            properties.selectedResult = 1
+                            return 'ok'
+                        end
+
+                        arguments.accessoryView[6].action({})
+                        return modalResult
+                    end,
+                    stopModalWithResult = function(_, result)
+                        modalResult = result
+                    end,
+                },
+                LrFileUtils = {
+                    chooseUniqueFileName = function(path)
+                        return path
+                    end,
+                    delete = function(path)
+                        os.remove(path)
+                    end,
+                },
+                LrFunctionContext = {
+                    callWithContext = function(_, callback)
+                        local cleanupHandlers = {}
+                        local context = {
+                            addCleanupHandler = function(_, handler)
+                                cleanupHandlers[#cleanupHandlers + 1] = handler
+                            end,
+                        }
+                        local result = callback(context)
+
+                        for _, handler in ipairs(cleanupHandlers) do
+                            handler()
+                        end
+
+                        return result
+                    end,
+                },
+                LrPathUtils = {
+                    child = function(parent, child)
+                        return parent .. '/' .. child
+                    end,
+                    getStandardFilePath = function()
+                        return '/tmp'
+                    end,
+                    leafName = function(path)
+                        return path:match('[^/\\]+$')
+                    end,
+                },
+                LrTasks = {
+                    pcall = function(...)
+                        return pcall(...)
+                    end,
+                    sleep = function() end,
+                    startAsyncTask = function(callback) callback() end,
+                },
+                LrView = {
+                    bind = function(key)
+                        return { key = key }
+                    end,
+                    osFactory = function()
+                        return {
+                            column = function(_, value) return value end,
+                            control_spacing = function() return 4 end,
+                            edit_field = function(_, value) return value end,
+                            picture = function(_, value) return value end,
+                            popup_menu = function(_, value) return value end,
+                            push_button = function(_, value) return value end,
+                            row = function(_, value) return value end,
+                            spacer = function(_, value) return value end,
+                            static_text = function(_, value) return value end,
+                        }
+                    end,
+                },
+            }
+
+            return assert(imports[name], 'Unexpected Lightroom import: ' .. tostring(name))
+        end
+
+        local dialog = assert(loadfile('crush-catalog.lrplugin/IdentificationDialog.lua'))()
+        local action, dispositions = dialog.showForResponse(photo, {
+            result = { results = { {
+                predictions = { { confidence = 0.95 } },
+            } } },
+            detectedImages = { { bytes = 'jpeg bytes' } },
+        }, 1, 1)
+
+        assert.are.equal('continue', action)
+        assert.are.equal('manual', dispositions[1].disposition)
+        assert.same({ 0.95 }, dispositions[1].predictionConfidences)
+        assert.same(manualPrediction, dispositions[1].selectedPrediction)
+        assert.are.equal('Search', dialogs[2].title)
+        assert.are.equal('< exclude >', dialogs[2].cancelVerb)
+        assert.is_true(dialogs[2].contents[1].immediate)
+        assert.are.equal(1, dialogs[2].accessoryView[1].fill_horizontal)
+        assert.are.equal('Unsure', dialogs[2].accessoryView[2].title)
+    end)
+
     it('automatically dispositions high and low confidence detections', function()
         local dialogCount = 0
         local photo = { getFormattedMetadata = function() return 'bird.jpg' end }
@@ -220,6 +356,7 @@ describe('IdentificationDialog', function()
                 },
                 LrFileUtils = {},
                 LrFunctionContext = {},
+                LrTasks = {},
                 LrPathUtils = {},
                 LrView = {},
             }

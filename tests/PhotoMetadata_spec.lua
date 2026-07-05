@@ -40,13 +40,26 @@ describe('PhotoMetadata', function()
             },
             { disposition = 'unsure' },
             { disposition = 'not_an_animal' },
+            {
+                disposition = 'manual',
+                selectedPrediction = {
+                    commonName = 'White Ibis',
+                    scientificName = 'Eudocimus albus',
+                    taxonomy = { 'Animalia', 'Eudocimus', 'albus' },
+                    commonNameTaxonomy = { 'Animals', 'Ibises', 'White Ibis' },
+                },
+            },
         }, TaxonomyNames)
 
-        assert.are.equal('American Robin, Fox Squirrel', summary.commonNames)
-        assert.are.equal('Sciurus niger, Turdus migratorius', summary.scientificNames)
-        assert.are.equal(5, summary.detectionCount)
+        assert.are.equal('American Robin, Fox Squirrel, White Ibis', summary.commonNames)
+        assert.are.equal(
+            'Eudocimus albus, Sciurus niger, Turdus migratorius',
+            summary.scientificNames
+        )
+        assert.are.equal(6, summary.detectionCount)
         assert.are.equal(2, summary.topSuggestionCount)
         assert.are.equal(1, summary.otherSuggestionCount)
+        assert.are.equal(1, summary.manualCount)
         assert.are.equal(1, summary.unsureCount)
         assert.are.equal(1, summary.detectionFalsePositivesCount)
         assert.are.equal('99.0', summary.topSuggestionConfidence)
@@ -158,6 +171,7 @@ describe('PhotoMetadata', function()
             detectionCount = '2',
             topSuggestionCount = '1',
             otherSuggestionCount = '0',
+            manualCount = '0',
             unsureCount = '1',
             detectionFalsePositivesCount = '0',
             topSuggestionConfidence = '36.5',
@@ -216,6 +230,7 @@ describe('PhotoMetadata', function()
             'detectionCount',
             'topSuggestionCount',
             'otherSuggestionCount',
+            'manualCount',
             'unsureCount',
             'detectionFalsePositivesCount',
             'topSuggestionConfidence',

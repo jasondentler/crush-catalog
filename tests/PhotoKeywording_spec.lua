@@ -157,6 +157,26 @@ describe('PhotoKeywording', function()
         assert.are.equal(6, #photo.added)
     end)
 
+    it('creates keywords for manual detections without suggestion indexes', function()
+        local catalog, photo = fixture()
+
+        PhotoKeywording.record(photo, { {
+            disposition = 'manual',
+            selectedPrediction = {
+                taxonomy = { 'Animalia', 'Eudocimus', 'albus' },
+                taxonomyRanks = { 'kingdom', 'genus', 'species' },
+                commonNameTaxonomy = { 'Animals', 'Ibises', 'White Ibis' },
+            },
+        } })
+
+        assert.is_not_nil(catalog.keywords[
+            'Crush Catalog > All > White Ibis'
+        ])
+        assert.is_not_nil(catalog.keywords[
+            'Crush Catalog > Scientific Names > Animalia > Eudocimus > albus'
+        ])
+    end)
+
     it('does not create self-synonyms for identical taxonomy names', function()
         local catalog, photo = fixture()
 

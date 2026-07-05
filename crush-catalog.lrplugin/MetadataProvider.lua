@@ -37,6 +37,14 @@ return {
             browsable = false
         },
         {
+            id = "manualCount",
+            version = 3,
+            title = "Manual Count",
+            dataType = "string",
+            searchable = false,
+            browsable = false
+        },
+        {
             id = "unsureCount",
             version = 2,
             title = "Unsure Count",
@@ -59,5 +67,5 @@ return {
             browsable = true,
         },
     },
-    schemaVersion = 2,
+    schemaVersion = 3,
 }

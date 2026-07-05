@@ -40,6 +40,14 @@ end
 function IdentificationLogic.disposition(dialogResult, result)
     local confidences = predictionConfidences(result)
 
+    if dialogResult.action == 'manual' then
+        return {
+            disposition = 'manual',
+            predictionConfidences = confidences,
+            selectedPrediction = dialogResult.selectedPrediction,
+        }
+    end
+
     if dialogResult.action == 'ok' then
         local predictionIndex = dialogResult.selectedPredictionIndex
         local prediction = (result.predictions or {})[predictionIndex]

@@ -89,4 +89,46 @@ describe('WildCatalogApi', function()
 
         assert.are.equal('http://example.test:9000/identify', capturedUrl)
     end)
+
+    it('connects the search request builder to the Lightroom HTTP adapter', function()
+        local capturedUrl
+        local capturedHeaders
+        local api = loadWildCatalogApi({
+            get = function(url, headers)
+                capturedUrl = url
+                capturedHeaders = headers
+
+                return [[{
+                    "total_items": 1,
+                    "items": [{
+                        "taxonomy": ["Animalia", "Eudocimus", "albus"],
+                        "taxonomy_rank_names": ["kingdom", "genus", "species"],
+                        "taxonomy_common_names": ["Animals", "Ibises", "White Ibis"]
+                    }]
+                }]], {
+                    { field = 'Content-Type', value = 'application/json' },
+                }
+            end,
+        })
+
+        local response = api.search('white ibis', {
+            baseUrl = 'http://localhost:8000/',
+            gpsCoordinates = {
+                latitude = 29.573361,
+                longitude = -94.389507,
+            },
+            commonNameLanguage = 'en-US',
+        })
+
+        assert.are.equal(
+            'http://localhost:8000/search?query=white%20ibis&lat=29.573361&lng=-94.389507',
+            capturedUrl
+        )
+        assert.same({
+            { field = 'Accept', value = 'application/json' },
+            { field = 'Accept-Language', value = 'en-US' },
+        }, capturedHeaders)
+        assert.are.equal(1, response.totalItems)
+        assert.are.equal('White Ibis', response.items[1].commonNameTaxonomy[3])
+    end)
 end)

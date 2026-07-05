@@ -41,6 +41,16 @@ function Http.postMultipart(url, parts, headers)
     }
 end
 
+function Http.get(url, headers)
+    local body, responseHeaders = LrHttp.get(url, headers)
+
+    return {
+        body = body,
+        headers = responseHeaders,
+        normalizedHeaders = HttpLogic.normalizeHeaders(responseHeaders),
+    }
+end
+
 Http.logic = HttpLogic
 
 return Http

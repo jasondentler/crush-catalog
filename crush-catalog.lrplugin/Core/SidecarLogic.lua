@@ -12,6 +12,7 @@ local NUMBER_FIELDS = {
     detectionCount = true,
     topSuggestionCount = true,
     otherSuggestionCount = true,
+    manualCount = true,
     unsureCount = true,
     detectionFalsePositivesCount = true,
     topSuggestionConfidence = true,

@@ -64,6 +64,28 @@ describe('Http', function()
         assert.is_nil(capturedParts[2].fileSize)
     end)
 
+    it('wraps LrHttp.get with normalized headers', function()
+        local capturedUrl
+        local capturedHeaders
+        local Http = loadHttp({
+            get = function(url, headers)
+                capturedUrl = url
+                capturedHeaders = headers
+
+                return 'body', {
+                    { field = 'Content-Type', value = 'application/json' },
+                }
+            end,
+        })
+
+        local response = Http.get('http://example.test/search', { 'header' })
+
+        assert.are.equal('http://example.test/search', capturedUrl)
+        assert.same({ 'header' }, capturedHeaders)
+        assert.are.equal('body', response.body)
+        assert.are.equal('application/json', response.normalizedHeaders['content-type'])
+    end)
+
     it('preserves a file size already provided by the caller', function()
         local Http = loadHttp({
             postMultipart = function()

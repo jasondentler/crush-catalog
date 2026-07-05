@@ -22,6 +22,9 @@ local IdentificationLogic = assert(
 local AutomaticModesLogic = assert(
     loadfile(pluginPath() .. '/Core/AutomaticModesLogic.lua')
 )()
+local IdentificationSearchDialog = assert(
+    loadfile(pluginPath() .. '/IdentificationSearchDialog.lua')
+)()
 local TaxonomyNames = assert(loadfile(pluginPath() .. '/Core/TaxonomyNames.lua'))()
 
 function IdentificationDialog.predictionItems(predictions)
@@ -51,8 +54,9 @@ local function writeDetectedImage(detectedImage)
     return imagePath
 end
 
-local function show(photo, result, detectedImage, position)
+local function show(photo, result, detectedImage, position, options)
     local imagePath = writeDetectedImage(detectedImage)
+    options = options or {}
 
     return LrFunctionContext.callWithContext('identificationDialog', function(context)
         context:addCleanupHandler(function()
@@ -70,6 +74,7 @@ local function show(photo, result, detectedImage, position)
         end
 
         properties.selectedPrediction = items[1].value
+        properties.manualPrediction = nil
 
         local dialogResult = LrDialogs.presentModalDialog {
             title = string.format(
@@ -125,6 +130,23 @@ local function show(photo, result, detectedImage, position)
                         closeWithResult(button, 'unsure')
                     end,
                 },
+                factory:push_button {
+                    title = LOC '$$$/CrushCatalog/NotListed=Not Listed',
+                    action = function(button)
+                        local searchResult = IdentificationSearchDialog.show({
+                            gpsCoordinates = options.gpsCoordinates,
+                            commonNameLanguage = options.commonNameLanguage,
+                            searchFunction = options.searchFunction,
+                        })
+
+                        if searchResult.action == 'manual'
+                            and searchResult.selectedPrediction ~= nil
+                        then
+                            properties.manualPrediction = searchResult.selectedPrediction
+                            closeWithResult(button, 'manual')
+                        end
+                    end,
+                },
             },
             actionVerb = LOC '$$$/CrushCatalog/Confirm=Confirm',
             cancelVerb = '< exclude >',
@@ -134,6 +156,7 @@ local function show(photo, result, detectedImage, position)
         return {
             action = dialogResult,
             selectedPredictionIndex = properties.selectedPrediction,
+            selectedPrediction = properties.manualPrediction,
         }
     end)
 end
@@ -159,7 +182,7 @@ function IdentificationDialog.showForResponse(photo, response, imageIndex, image
                 imageCount = imageCount,
                 detectionIndex = index,
                 detectionCount = #results,
-            })
+            }, options)
 
             if dialogResult.action == 'other' then
                 return 'stop'

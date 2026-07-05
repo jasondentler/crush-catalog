@@ -168,6 +168,16 @@ local function appendDuration(durations, duration)
     end
 end
 
+local function copyOptions(options)
+    local copy = {}
+
+    for key, value in pairs(options or {}) do
+        copy[key] = value
+    end
+
+    return copy
+end
+
 local function waitWhilePaused(progress)
     local reportedPaused = false
 
@@ -250,6 +260,8 @@ local function identifySelectedPhotos()
         end
 
         local metadata = metadataForPhoto(photo)
+        local commonNameLanguage = LrLocalization.currentLanguage()
+        local dialogOptions = copyOptions(options)
         local stop = false
         local caption = string.format(
             LOC '$$$/CrushCatalog/IdentifyProgressCaption=Identifying %s (%d of %d)',
@@ -272,11 +284,14 @@ local function identifySelectedPhotos()
         local imageStartedAt = options.mode == 'automatic'
             and LrDate.currentTime() or nil
 
+        dialogOptions.gpsCoordinates = metadata.exifOverride.gps_coordinates
+        dialogOptions.commonNameLanguage = commonNameLanguage
+
         local succeeded, response = LrTasks.pcall(WildCatalogApi.identify, metadata.path, {
             originalFilename = metadata.originalFilename,
             exifOverride = metadata.exifOverride,
             return_detected_images = options.mode ~= 'automatic',
-            common_name_language = LrLocalization.currentLanguage(),
+            common_name_language = commonNameLanguage,
         })
 
         if succeeded then
@@ -291,7 +306,7 @@ local function identifySelectedPhotos()
                 response,
                 index,
                 #photos,
-                options
+                dialogOptions
             )
 
             if processed then

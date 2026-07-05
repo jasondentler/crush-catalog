@@ -8,7 +8,7 @@ describe('MetadataProvider', function()
         }
         local fieldIds = {}
 
-        assert.are.equal(2, schema.schemaVersion)
+        assert.are.equal(3, schema.schemaVersion)
 
         for _, field in ipairs(schema.metadataFieldsForPhotos) do
             assert.is_nil(fieldIds[field.id], 'Duplicate metadata field: ' .. field.id)
@@ -17,6 +17,12 @@ describe('MetadataProvider', function()
                 'Unsupported metadata type for ' .. field.id .. ': ' .. tostring(field.dataType)
             )
             fieldIds[field.id] = true
+        end
+
+        for _, field in ipairs(schema.metadataFieldsForPhotos) do
+            if field.id == 'manualCount' then
+                assert.are.equal(3, field.version)
+            end
         end
     end)
 end)

@@ -372,7 +372,10 @@ local function createAndAttach(photo, detections)
     for _, detection in ipairs(detections or {}) do
         local prediction = detection.selectedPrediction
 
-        if prediction ~= nil and detection.selectedPredictionIndex ~= nil then
+        if prediction ~= nil
+            and (detection.selectedPredictionIndex ~= nil
+                or detection.disposition == 'manual')
+        then
             local taxonomy = prediction.taxonomy or {}
             local ranks = prediction.taxonomyRanks or prediction.taxonomy_ranks or {}
             local commonNames = prediction.commonNameTaxonomy
