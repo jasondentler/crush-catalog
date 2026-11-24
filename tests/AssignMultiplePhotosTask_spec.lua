@@ -29,10 +29,26 @@ describe('AssignMultiplePhotosTask', function()
         local sleepCalls = 0
         local task
         local traceCalls = {}
-        local selectedPrediction = {
-            taxonomy = { 'Animalia', 'Eudocimus', 'albus' },
-            taxonomyRanks = { 'kingdom', 'genus', 'species' },
-            commonNameTaxonomy = { 'Animals', 'Ibises', 'White Ibis' },
+        local selectedPredictions = {
+            {
+                taxonomy = { 'Animalia', 'Eudocimus', 'albus' },
+                taxonomyRanks = { 'kingdom', 'genus', 'species' },
+                commonNameTaxonomy = { 'Animals', 'Ibises', 'White Ibis' },
+            },
+            {
+                taxonomy = { 'Plantae', 'Gaillardia', 'pulchella' },
+                taxonomyRanks = { 'kingdom', 'genus', 'species' },
+                commonNameTaxonomy = {
+                    'Plants',
+                    'Blanket Flowers',
+                    'Indian Blanket',
+                },
+            },
+            {
+                taxonomy = { 'Animalia', 'Corvus', 'corax' },
+                taxonomyRanks = { 'kingdom', 'genus', 'species' },
+                commonNameTaxonomy = { 'Animals', 'Ravens', 'Common Raven' },
+            },
         }
         local photos = {
             {
@@ -67,7 +83,7 @@ describe('AssignMultiplePhotosTask', function()
                 searchCalls[#searchCalls + 1] = options
                 return {
                     action = 'manual',
-                    selectedPrediction = selectedPrediction,
+                    selectedPredictions = selectedPredictions,
                 }
             end,
         }
@@ -126,6 +142,7 @@ describe('AssignMultiplePhotosTask', function()
 
         assert.are.equal(1, #searchCalls)
         assert.are.equal('en-US', searchCalls[1].commonNameLanguage)
+        assert.are.equal('multiple', searchCalls[1].selectionMode)
         assert.is_true(progress.cancelable)
         assert.is_true(progress.pausable)
         assert.is_true(progress.completed)
@@ -143,9 +160,15 @@ describe('AssignMultiplePhotosTask', function()
         for index, call in ipairs(recordCalls) do
             assert.are.equal(photos[index], call.photo)
             assert.is_true(call.reprocessing)
-            assert.are.equal(1, #call.detections)
-            assert.are.equal('manual', call.detections[1].disposition)
-            assert.same(selectedPrediction, call.detections[1].selectedPrediction)
+            assert.are.equal(3, #call.detections)
+
+            for detectionIndex, detection in ipairs(call.detections) do
+                assert.are.equal('manual', detection.disposition)
+                assert.same(
+                    selectedPredictions[detectionIndex],
+                    detection.selectedPrediction
+                )
+            end
         end
 
         assert.are.equal(1, #messages)
@@ -168,6 +191,62 @@ describe('AssignMultiplePhotosTask', function()
         assert.are.equal('Assignment resumed', traceCalls[#traceCalls])
         assert.are.equal('Assignment paused', progress.caption)
         assert.are.equal('second.jpg', component.photoLabel(photos[2]))
+    end)
+
+    it('does not write when no species are selected', function()
+        local progressCreated = false
+        local recordCalls = 0
+        local task
+
+        package.loaded.IdentificationSearchDialog = {
+            show = function()
+                return {
+                    action = 'manual',
+                    selectedPredictions = {},
+                }
+            end,
+        }
+        package.loaded.PhotoMetadata = {
+            record = function()
+                recordCalls = recordCalls + 1
+            end,
+            trace = function() end,
+        }
+
+        _G.import = function(name)
+            local imports = {
+                LrApplication = {
+                    activeCatalog = function()
+                        return {
+                            getTargetPhotos = function()
+                                return {
+                                    { getFormattedMetadata = function() return 'bird.jpg' end },
+                                }
+                            end,
+                        }
+                    end,
+                },
+                LrDialogs = {},
+                LrLocalization = {
+                    currentLanguage = function() return 'en-US' end,
+                },
+                LrProgressScope = function()
+                    progressCreated = true
+                    return {}
+                end,
+                LrTasks = {
+                    pcall = pcall,
+                    startAsyncTask = function(callback) task = callback end,
+                },
+            }
+
+            return assert(imports[name], 'Unexpected Lightroom import: ' .. tostring(name))
+        end
+
+        assert(loadfile('crush-catalog.lrplugin/AssignMultiplePhotosTask.lua'))()
+        task()
+        assert.are.equal(0, recordCalls)
+        assert.is_false(progressCreated)
     end)
 
     it('does not write when no photos are selected or no manual result is chosen', function()
@@ -255,7 +334,7 @@ describe('AssignMultiplePhotosTask', function()
             show = function()
                 return {
                     action = 'manual',
-                    selectedPrediction = { taxonomy = { 'Animalia' } },
+                    selectedPredictions = { { taxonomy = { 'Animalia' } } },
                 }
             end,
         }

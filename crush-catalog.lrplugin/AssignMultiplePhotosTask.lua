@@ -58,6 +58,7 @@ local function assignMultiplePhotos()
 
     local searchResult = IdentificationSearchDialog.show({
         commonNameLanguage = LrLocalization.currentLanguage(),
+        selectionMode = 'multiple',
     })
 
     if searchResult == nil or searchResult.action ~= 'manual' then
@@ -66,10 +67,20 @@ local function assignMultiplePhotos()
         return
     end
 
-    local detections = { {
-        disposition = 'manual',
-        selectedPrediction = searchResult.selectedPrediction,
-    } }
+    local detections = {}
+
+    for _, prediction in ipairs(searchResult.selectedPredictions or {}) do
+        detections[#detections + 1] = {
+            disposition = 'manual',
+            selectedPrediction = prediction,
+        }
+    end
+
+    if #detections == 0 then
+        trace('Multiple assignment skipped; no selected species')
+        return
+    end
+
     local progress = LrProgressScope {
         title = LOC '$$$/CrushCatalog/AssignMultipleProgress=Assigning species to selected photos',
     }
