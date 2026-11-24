@@ -9,13 +9,14 @@ local function lastItem(values)
 end
 
 local function taxonomyRanks(prediction)
-    return prediction.taxonomyRanks or prediction.taxonomy_ranks or {}
+    return prediction.taxonomyRanks or prediction.taxonomy_rank_names or prediction.taxonomy_ranks or {}
 end
 
 local function commonNameTaxonomy(prediction)
     return prediction.commonNameTaxonomy
         or prediction.taxonomyCommonNames
         or prediction.taxonomy_common_names
+        or prediction.common_names
         or {}
 end
 

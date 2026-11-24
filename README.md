@@ -2,13 +2,13 @@
 
 # Crush Catalog
 
-Crush Catalog is a Lightroom Classic plugin backed by the local Wild Catalog animal-identification service. It exports selected photos as temporary JPEGs, asks the backend to detect and identify animals, lets you confirm each detection, and writes Lightroom keywords for confirmed species.
+Crush Catalog is a Lightroom Classic plugin backed by the local Wild Catalog animal-identification service. It uploads selected original photo files, asks the backend to detect and identify animals, lets you confirm each detection, and writes Lightroom keywords for confirmed species.
 
 ## How It Works
 
 - Select one or more photos in Lightroom Classic.
 - Run `Library > Plug-in Extras > Identify Species`.
-- The plugin exports temporary JPEG renditions and sends them to the local backend.
+- The plugin uploads original photo files and available Lightroom metadata to the configured backend. Lightroom develop edits are not rendered by this existing workflow.
 - The backend uses Wild Catalog detection and classification data to suggest animal species.
 - Lightroom shows a confirmation dialog for each detection, including cropped previews when available.
 - Confirmed species are written as Lightroom keywords under `Crush Catalog > Animals`, with birds grouped under `Birds`.

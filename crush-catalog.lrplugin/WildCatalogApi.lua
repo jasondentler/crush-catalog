@@ -17,6 +17,7 @@ local JSON = assert(loadfile(pluginPath() .. '/JSON.lua'))()
 local Http = assert(loadfile(pluginPath() .. '/Http.lua'))()
 local Identify = assert(loadfile(pluginPath() .. '/Core/WildCatalogIdentify.lua'))()
 local Search = assert(loadfile(pluginPath() .. '/Core/WildCatalogSearch.lua'))()
+local Batch = assert(loadfile(pluginPath() .. '/Core/WildCatalogBatch.lua'))()
 
 local function trim(value)
     if value == nil then
@@ -65,6 +66,26 @@ function WildCatalogApi.search(query, options)
     local response = Http.get(request.url, request.headers)
 
     return Search.parseResponse(response, JSON)
+end
+
+-- Call within a Lightroom asynchronous task with a function context.
+function WildCatalogApi.identifyBatch(manifest, options)
+    local LrTasks = import 'LrTasks'
+    options = options or {}
+    return Batch.run(manifest, {
+        baseUrl = options.baseUrl or configuredBaseUrl(),
+        json = JSON,
+        protect = LrTasks.pcall,
+        resolveAsset = options.resolveAsset,
+        isCanceled = options.isCanceled,
+        onProgress = options.onProgress,
+        transport = {
+            request = Http.request,
+            upload = function(url, path, headers)
+                return Http.upload(url, path, headers, LrTasks.pcall)
+            end,
+        },
+    })
 end
 
 WildCatalogApi.JSON = JSON

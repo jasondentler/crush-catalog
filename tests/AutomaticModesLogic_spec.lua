@@ -47,6 +47,13 @@ describe('AutomaticModesLogic', function()
         assert.are.equal('unsure', logic.automaticDisposition({ predictions = {} }, 90).disposition)
     end)
 
+    it('does not automatically confirm review-required detections', function()
+        local flagged = result(0.99)
+        flagged.review_required = true
+        assert.are.equal('unsure', logic.automaticDisposition(flagged, 70).disposition)
+        assert.is_true(logic.shouldShowManual(flagged, { mode = 'assisted', threshold = 70 }))
+    end)
+
     it('shows only low-confidence detections in assisted mode', function()
         assert.is_false(logic.shouldShowManual(
             result(0.95),

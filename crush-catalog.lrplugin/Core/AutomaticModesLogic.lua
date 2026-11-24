@@ -44,7 +44,9 @@ function AutomaticModesLogic.automaticDisposition(result, threshold)
     local confidence = prediction ~= nil and tonumber(prediction.confidence) or nil
     local minimum = AutomaticModesLogic.threshold(threshold)
 
-    if minimum ~= nil and confidence ~= nil and confidence * 100 >= minimum then
+    if result.review_required ~= true
+        and minimum ~= nil and confidence ~= nil and confidence * 100 >= minimum
+    then
         return IdentificationLogic.disposition({
             action = 'ok',
             selectedPredictionIndex = 1,

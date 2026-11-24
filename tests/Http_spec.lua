@@ -86,6 +86,41 @@ describe('Http', function()
         assert.are.equal('application/json', response.normalizedHeaders['content-type'])
     end)
 
+    it('streams binary file content through the SDK method override', function()
+        local filename = os.tmpname()
+        local content = string.rep('a', 300 * 1024) .. string.char(0, 255)
+        local file = assert(io.open(filename, 'wb'))
+        file:write(content)
+        file:close()
+
+        local Http = loadHttp({
+            post = function(url, read, headers, method, timeout, size)
+                assert.are.equal('https://example.test/asset', url)
+                assert.are.equal('PUT', method)
+                assert.are.equal(300, timeout)
+                assert.are.equal(#content, size)
+                assert.are.equal('application/octet-stream', headers[1].value)
+                local chunks = {}
+                while true do
+                    local chunk = read()
+                    if not chunk then
+                        break
+                    end
+                    assert.is_true(#chunk <= 256 * 1024)
+                    chunks[#chunks + 1] = chunk
+                end
+                assert.are.equal(content, table.concat(chunks))
+                return '{}', { status = 200 }
+            end,
+        })
+        local ok, response = pcall(Http.upload, 'https://example.test/asset', filename,
+            { { field = 'Content-Type', value = 'application/octet-stream' } }, pcall)
+        os.remove(filename)
+        assert.is_true(ok)
+        assert.are.equal(200, response.status)
+        assert.are.equal('{}', response.body)
+    end)
+
     it('preserves a file size already provided by the caller', function()
         local Http = loadHttp({
             postMultipart = function()

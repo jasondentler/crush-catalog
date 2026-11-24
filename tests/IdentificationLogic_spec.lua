@@ -51,6 +51,23 @@ describe('IdentificationLogic', function()
         }, IdentificationLogic.disposition({ action = 'unsure' }, {}))
     end)
 
+    it('preserves batch and current identify taxonomy metadata', function()
+        local prediction = {
+            confidence = 0.96,
+            taxonomy = { 'Animalia', 'Corvus', 'Corvus corax' },
+            taxonomy_rank_names = { 'kingdom', 'genus', 'species' },
+            common_names = { 'Animals', 'Ravens', 'Common Raven' },
+        }
+        local confirmed = IdentificationLogic.disposition({
+            action = 'ok', selectedPredictionIndex = 1,
+        }, { predictions = { prediction } })
+
+        assert.same(prediction.taxonomy_rank_names, confirmed.selectedPrediction.taxonomyRanks)
+        assert.same(prediction.common_names, confirmed.selectedPrediction.commonNameTaxonomy)
+        assert.are.equal('Common Raven', TaxonomyNames.commonName(prediction))
+        assert.are.equal('Corvus corax', TaxonomyNames.scientificName(prediction))
+    end)
+
     it('maps manual search results to manual dispositions', function()
         local selectedPrediction = {
             taxonomy = { 'Animalia', 'Eudocimus', 'albus' },

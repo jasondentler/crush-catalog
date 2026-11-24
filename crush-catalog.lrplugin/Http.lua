@@ -51,6 +51,37 @@ function Http.get(url, headers)
     }
 end
 
+function Http.request(method, url, body, headers, totalSize)
+    local responseBody, responseHeaders = LrHttp.post(
+        url, body, headers, method, 300, totalSize
+    )
+    return {
+        body = responseBody,
+        status = responseHeaders and tonumber(responseHeaders.status),
+    }
+end
+
+function Http.upload(url, path, headers, protect)
+    local file = io.open(path, 'rb')
+    if not file then
+        error('Unable to open requested representation', 0)
+    end
+    local ok, result = protect(function()
+        local size = file:seek('end')
+        if not size or size <= 0 or not file:seek('set', 0) then
+            error('Unable to determine representation size', 0)
+        end
+        return Http.request('PUT', url, function()
+            return file:read(256 * 1024)
+        end, headers, size)
+    end)
+    file:close()
+    if not ok then
+        error('Representation upload failed', 0)
+    end
+    return result
+end
+
 Http.logic = HttpLogic
 
 return Http

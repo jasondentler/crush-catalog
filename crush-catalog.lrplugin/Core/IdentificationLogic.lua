@@ -66,8 +66,8 @@ function IdentificationLogic.disposition(dialogResult, result)
             selectedPrediction = {
                 confidence = prediction.confidence,
                 taxonomy = prediction.taxonomy or {},
-                taxonomyRanks = prediction.taxonomy_ranks or {},
-                commonNameTaxonomy = prediction.taxonomy_common_names or {},
+                taxonomyRanks = prediction.taxonomy_rank_names or prediction.taxonomy_ranks or {},
+                commonNameTaxonomy = prediction.taxonomy_common_names or prediction.common_names or {},
             },
         }
     end
