@@ -79,8 +79,14 @@ function WildCatalogApi.identifyBatch(manifest, options)
         resolveAsset = options.resolveAsset,
         isCanceled = options.isCanceled,
         onProgress = options.onProgress,
+        onCompleted = options.onCompleted,
         transport = {
             request = Http.request,
+            get = function(url, headers)
+                local response = Http.get(url, headers)
+                response.status = response.headers and tonumber(response.headers.status)
+                return response
+            end,
             upload = function(url, path, headers)
                 return Http.upload(url, path, headers, LrTasks.pcall)
             end,

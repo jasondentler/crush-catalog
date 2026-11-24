@@ -97,6 +97,46 @@ function Batch.run(manifest, options)
         end
     end
 
+    -- The review callback runs while the completed session is still leased
+    -- by its secret token. Evidence URLs cannot be supplied by the server or UI.
+    local function reviewCrop(member, final)
+        if not manifest.include_review_images or not transport.get then return nil end
+        checkCanceled()
+        local frame = final.results[member.frameIndex]
+        local index = member.objectIndex
+        if frame ~= member.frame or type(index) ~= 'number' or index < 1
+            or index % 1 ~= 0 or frame.objects[index] ~= member.object then
+            return nil
+        end
+        local url = batchUrl .. '/frames/' .. frame.frame_id .. '/objects/'
+            .. tostring(index) .. '/review-image'
+        local fetched, response = protect(transport.get, url, {
+            { field = 'Accept', value = 'image/jpeg' },
+            { field = 'X-Batch-Token', value = token },
+        })
+        checkCanceled()
+        if not fetched or type(response) ~= 'table' or response.status ~= 200
+            or type(response.body) ~= 'string' or #response.body > 512 * 1024 then
+            return nil
+        end
+        local h = response.normalizedHeaders or {}
+        if h['content-type'] ~= 'image/jpeg' or h['x-frame-id'] ~= frame.frame_id
+            or tonumber(h['x-object-index']) ~= index
+            or h['x-coordinate-space'] ~= frame.coordinate_space
+            or type(h['x-bounding-box']) ~= 'string' then return nil end
+        local decoded, box = pcall(json.decode, json, h['x-bounding-box'])
+        if not decoded or type(box) ~= 'table' or #box ~= 4
+            or type(member.object.bounding_box) ~= 'table' then return nil end
+        for i = 1, 4 do
+            if box[i] ~= member.object.bounding_box[i] then return nil end
+        end
+        return {
+            frame_id = frame.frame_id, object_index = index,
+            coordinate_space = frame.coordinate_space, bounding_box = box,
+            bytes = response.body,
+        }
+    end
+
     local ok, result = protect(function()
         checkCanceled()
         local progress = decode(transport.request('POST', base, json:encode(manifest),
@@ -114,10 +154,17 @@ function Batch.run(manifest, options)
             checkCanceled()
             validateProgress(progress, batchId)
             if progress.status == 'completed' then
-                return {
+                local final = {
                     results = finalResults(progress, manifest, frames),
                     operationCounts = progress.operation_counts,
                 }
+                if options.onCompleted then
+                    final.confirmations = options.onCompleted(final, function(member)
+                        return reviewCrop(member, final)
+                    end)
+                    checkCanceled()
+                end
+                return final
             end
             if options.onProgress then
                 options.onProgress(#progress.results - #progress.provisional_frame_ids, #manifest.frames)

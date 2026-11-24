@@ -112,6 +112,10 @@ function Preparation.run(plan, identifyBatch, options)
         baseUrl = options.baseUrl,
         isCanceled = options.isCanceled,
         onProgress = options.onProgress,
+        onCompleted = options.onCompleted and function(final, getCrop)
+            if not plan.close() then error('Temporary preview cleanup failed', 0) end
+            return options.onCompleted(final, getCrop)
+        end or nil,
         resolveAsset = plan.resolveAsset,
     })
     local cleanupOk, removed = LrTasks.pcall(plan.close)

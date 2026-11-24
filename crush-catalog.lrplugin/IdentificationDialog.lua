@@ -76,6 +76,27 @@ local function show(photo, result, detectedImage, position, options)
         properties.selectedPrediction = items[1].value
         properties.manualPrediction = nil
 
+        local contents = {
+            spacing = factory:control_spacing(),
+            bind_to_object = properties,
+            factory:picture {
+                value = imagePath,
+                width = 640,
+                height = 480,
+                frame_width = 1,
+            },
+            factory:popup_menu {
+                items = items,
+                value = LrView.bind('selectedPrediction'),
+                width = 640,
+            },
+        }
+        if options.batchReviewSummary then
+            contents[#contents + 1] = factory:static_text {
+                title = options.batchReviewSummary, width = 640, height_in_lines = 4,
+            }
+        end
+
         local dialogResult = LrDialogs.presentModalDialog {
             title = string.format(
                 'Image %d of %d: %s (Animal %d of %d)',
@@ -85,21 +106,7 @@ local function show(photo, result, detectedImage, position, options)
                 position.detectionIndex,
                 position.detectionCount
             ),
-            contents = factory:column {
-                spacing = factory:control_spacing(),
-                bind_to_object = properties,
-                factory:picture {
-                    value = imagePath,
-                    width = 640,
-                    height = 480,
-                    frame_width = 1,
-                },
-                factory:popup_menu {
-                    items = items,
-                    value = LrView.bind('selectedPrediction'),
-                    width = 640,
-                },
-            },
+            contents = factory:column(contents),
             accessoryView = factory:row {
                 spacing = factory:control_spacing(),
                 fill_horizontal = 1,
@@ -159,6 +166,24 @@ local function show(photo, result, detectedImage, position, options)
             selectedPrediction = properties.manualPrediction,
         }
     end)
+end
+
+-- Batch review uses the same individual confirmation controls with a verified crop.
+-- No catalog write occurs in this dialog.
+function IdentificationDialog.showBatchObject(photo, member, detectedImage, options)
+    local decision = show(photo, member.object, detectedImage, {
+        imageIndex = member.frameIndex,
+        imageCount = options.imageCount,
+        detectionIndex = member.objectIndex,
+        detectionCount = #member.frame.objects,
+    }, options)
+    if decision.action == 'other' then
+        return { action = 'stop' }
+    end
+    if decision.action == 'cancel' then
+        return { action = 'unsure' }
+    end
+    return decision
 end
 
 function IdentificationDialog.showForResponse(photo, response, imageIndex, imageCount, options)

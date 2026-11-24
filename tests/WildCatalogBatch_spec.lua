@@ -173,4 +173,59 @@ describe('WildCatalogBatch', function()
         end, 'Batch identification failed; no results returned')
         assert.are.equal('DELETE', calls[2].method)
     end)
+
+    it('fetches only verified final review evidence before session deletion', function()
+        local first = result('f1', 'identified')
+        first.objects = { { bounding_box = { 1, 2, 3, 4 } } }
+        first.coordinate_space = 'original:supplied_preview'
+        local options, calls = fixture({
+            reply(201, progress({}, { first, result('f2') }, {}, 'completed')),
+        })
+        local request = manifest()
+        request.include_review_images = true
+        local badBox = false
+        options.transport.get = function(url, headers)
+            assert.are.equal(1, #calls)
+            assert.are.equal('https://example.test/v1/batches/session-1/frames/f1'
+                .. '/objects/1/review-image', url)
+            assert.are.equal('_secret-1', headers[2].value)
+            return {
+                status = 200, body = 'jpeg bytes',
+                normalizedHeaders = {
+                    ['content-type'] = 'image/jpeg',
+                    ['x-frame-id'] = 'f1',
+                    ['x-object-index'] = '1',
+                    ['x-coordinate-space'] = first.coordinate_space,
+                    ['x-bounding-box'] = badBox and '[1,2,3,5]' or '[1,2,3,4]',
+                },
+            }
+        end
+        options.onCompleted = function(final, getCrop)
+            local member = { frameIndex = 1, frame = final.results[1],
+                objectIndex = 1, object = final.results[1].objects[1] }
+            assert.are.equal('jpeg bytes', getCrop(member).bytes)
+            badBox = true
+            assert.is_nil(getCrop(member))
+            member.objectIndex = 2
+            assert.is_nil(getCrop(member))
+            return { approved = {} }
+        end
+        local response = Batch.run(request, options)
+        assert.same({ approved = {} }, response.confirmations)
+        assert.are.equal('DELETE', calls[2].method)
+    end)
+
+    it('releases the completed session if review is canceled', function()
+        local options, calls = fixture({
+            reply(201, progress({}, { result('f1'), result('f2') }, {}, 'completed')),
+        })
+        options.onCompleted = function()
+            error('Batch canceled', 0)
+        end
+        assert.has_error(function()
+            Batch.run(manifest(), options)
+        end, 'Batch canceled')
+        assert.are.equal('DELETE', calls[2].method)
+    end)
+
 end)
