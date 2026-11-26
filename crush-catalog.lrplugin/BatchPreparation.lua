@@ -32,11 +32,16 @@ local function snapshot(photo)
     local camera, sequence
     if meaningful(serial) and meaningful(make) and meaningful(model) then
         camera = make .. '\0' .. model .. '\0' .. serial
-        -- This is a conservative sequence partition, not a camera burst ID.
-        -- Server-side temporal and visual checks still determine actual bursts.
-        local date = type(capture) == 'string' and capture:match('^%d%d%d%d%-%d%d%-%d%d')
-        local folder = path and LrPathUtils.parent(path)
-        if date and folder then sequence = camera .. '\0' .. folder .. '\0' .. date end
+    end
+    -- The import folder/date is a sequence partition, not a burst ID.
+    -- Use the known camera model to partition it even without a body serial.
+    -- Wild Catalog still verifies timing and visual continuity.
+    local date = type(capture) == 'string' and capture:match('^%d%d%d%d%-%d%d%-%d%d')
+    local folder = path and LrPathUtils.parent(path)
+    if date and folder then
+        sequence = folder .. '\0' .. date .. '\0'
+            .. (meaningful(make) and make or '') .. '\0'
+            .. (meaningful(model) and model or '')
     end
     local attrs = path and LrFileUtils.exists(path) == 'file'
         and LrFileUtils.fileAttributes(path) or {}
@@ -99,6 +104,7 @@ function Preparation.prepare(photos, options)
     return Manifest.prepare(items, {
         language = options.language or LrLocalization.currentLanguage(),
         enableBurst = options.enableBurst,
+        resumeFrames = options.resumeFrames,
         isCurrent = Preparation.isCurrent,
         makePreview = makePreview, removePreview = removePreview,
     })
@@ -111,6 +117,7 @@ function Preparation.run(plan, identifyBatch, options)
     local ok, result = LrTasks.pcall(identifyBatch, plan.manifest, {
         baseUrl = options.baseUrl,
         isCanceled = options.isCanceled,
+        isUploadCanceled = options.isUploadCanceled,
         onProgress = options.onProgress,
         onCompleted = options.onCompleted and function(final, getCrop)
             if not plan.close() then error('Temporary preview cleanup failed', 0) end

@@ -106,9 +106,15 @@ local function build(items, options)
             camera_id = camera, session_id = session,
             representations = { full },
         }
-        local preview = options.enableBurst ~= false and camera and session
-            and capture and precision > 0 and (coordinates or absent)
-            and item.path:lower():match('%.arw$') ~= nil
+        local blockers = {}
+        if options.enableBurst == false then blockers[#blockers + 1] = 'Burst disabled' end
+        if not session then blockers[#blockers + 1] = 'Sequence identity unavailable' end
+        if not capture or precision == 0 then blockers[#blockers + 1] = 'Subsecond time unavailable' end
+        if not coordinates and not absent then blockers[#blockers + 1] = 'GPS context unknown' end
+        if not item.path:lower():match('%.arw$') then
+            blockers[#blockers + 1] = 'Not Sony ARW'
+        end
+        local preview = #blockers == 0
         if preview then
             frame.representations[2] = {
                 representation_id = 'preview', role = 'preview', filename = 'preview.jpg',
@@ -116,7 +122,7 @@ local function build(items, options)
             mode = 'burst'
         end
         frames[#frames + 1] = frame
-        assets[frame.frame_id] = { item = item, preview = preview ~= nil and preview ~= false }
+        assets[frame.frame_id] = { item = item, preview = preview, previewBlockers = blockers }
     end
     local plan = {
         manifest = { schema_version = 1, execution_mode = mode, frames = frames },
@@ -159,7 +165,22 @@ function Manifest.prepare(items, options)
         and #options.language <= 64, 'Invalid common name language')
     assert(type(options.isCurrent) == 'function' and type(options.makePreview) == 'function'
         and type(options.removePreview) == 'function', 'Missing asset callbacks')
-    local plans, excluded, pending, seen, paths = {}, {}, {}, {}, {}
+    local plans, excluded, pending, seen, paths, resumed = {}, {}, {}, {}, {}, {}
+    local function resumeMatch(item)
+        local saved = options.resumeFrames and options.resumeFrames[item.photoId]
+        if not saved then return false end
+        local frame = saved.frame
+        local full = frame and frame.representations and frame.representations[1]
+        local a, b = gps(item.gps), frame and frame.gps
+        local sameGps = (a == nil and b == nil) or (a and b
+            and math.abs(a.latitude - b.latitude) <= 1e-9
+            and math.abs(a.longitude - b.longitude) <= 1e-9)
+        return frame and full and full.role == 'full'
+            and frame.frame_id == item.photoId and frame.source_id == item.sourceId
+            and frame.captured_at == timestamp(item.capturedAt) and sameGps
+            and frame.common_name_language == options.language
+            and full.filename == basename(item.path) and full.byte_count == item.byteCount
+    end
     local function flush()
         if #pending > 0 then
             plans[#plans + 1] = build(pending, options)
@@ -173,6 +194,13 @@ function Manifest.prepare(items, options)
         if reason then
             flush()
             excluded[#excluded + 1] = { item = item, reason = reason }
+        elseif resumeMatch(item) then
+            flush()
+            seen[item.photoId] = true
+            paths[item.path] = true
+            resumed[#resumed + 1] = {
+                frame_id = item.photoId, batch_id = options.resumeFrames[item.photoId].batch_id,
+            }
         else
             seen[item.photoId] = true
             paths[item.path] = true
@@ -181,7 +209,7 @@ function Manifest.prepare(items, options)
         end
     end
     flush()
-    return plans, excluded
+    return plans, excluded, resumed
 end
 
 -- Protect against changes to source or catalog edit state before later writes.

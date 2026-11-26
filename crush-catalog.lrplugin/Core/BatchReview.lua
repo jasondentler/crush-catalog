@@ -27,9 +27,10 @@ local function taxon(prediction)
     return prediction.canonical_namespace .. ':' .. tostring(prediction.canonical_taxon_id)
 end
 
-local function geometry(frame, object)
+local function geometry(frame, object, allowClipped)
     local b = object.bounding_box
-    return object.geometry_provenance == 'detected' and object.geometry_clipped == false
+    return object.geometry_provenance == 'detected'
+        and (object.geometry_clipped == false or (allowClipped and object.geometry_clipped == true))
         and finite(frame.width) and finite(frame.height)
         and frame.width > 0 and frame.height > 0
         and type(frame.coordinate_space) == 'string' and frame.coordinate_space ~= ''
@@ -46,6 +47,10 @@ local function safeTop(member)
         and type(object.conflict_evidence_frame_ids) == 'table'
         and #object.conflict_evidence_frame_ids == 0
         and taxon((object.predictions or {})[1]) or nil
+end
+
+local function evidenceKey(object, frameId)
+    return tostring(object.track_id) .. ':' .. frameId
 end
 
 local function trackUnit(members)
@@ -67,13 +72,14 @@ local function trackUnit(members)
                 or #object.evidence_frame_ids ~= 1 or object.evidence_frame_ids[1] ~= frameId then
                 return nil
             end
-            direct[frameId] = member
+            direct[evidenceKey(object, frameId)] = member
             anchors[#anchors + 1] = member
         elseif object.identification_provenance == 'propagated' then
             -- The named evidence must be a preceding direct member of this
             -- exact track, not an unrelated detection in the same photograph.
             local evidence = object.evidence_frame_ids
-            if type(evidence) ~= 'table' or #evidence ~= 1 or not direct[evidence[1]] then
+            if type(evidence) ~= 'table' or #evidence ~= 1
+                or not direct[evidenceKey(object, evidence[1])] then
                 return nil
             end
         else
@@ -84,8 +90,123 @@ local function trackUnit(members)
     return { kind = 'track', members = members, evidence = anchors, taxon = id }
 end
 
+-- Separate geometry-only tracks are explicit manual-review units.
+-- They cannot confer automatic classifier reuse or bridge representations.
+local function manualTrackUnit(members)
+    if #members < 2 then return nil end
+    local previous, direct = nil, {}
+    for _, member in ipairs(members) do
+        local object, frameId = member.object, member.frame.frame_id
+        local evidence = object.evidence_frame_ids
+        if not geometry(member.frame, object)
+            or type(evidence) ~= 'table' or #evidence ~= 1
+            or type(object.conflict_evidence_frame_ids) ~= 'table'
+            or (previous and (member.frameIndex ~= previous.frameIndex + 1
+                or member.frame.coordinate_space ~= previous.frame.coordinate_space)) then
+            return nil
+        end
+        if object.identification_provenance == 'direct' and evidence[1] == frameId then
+            direct[frameId] = true
+        elseif object.identification_provenance ~= 'propagated' or not direct[evidence[1]] then
+            return nil
+        end
+        previous = member
+    end
+    local safe = trackUnit(members)
+    if safe then
+        safe.evidence = members
+        return safe
+    end
+    return { kind = 'track', members = members, evidence = members, automaticBlocked = true }
+end
+
+-- A candidate region is not evidence for classifier reuse. But independent
+-- direct identifications can each qualify without sharing an inference track.
+local function independentRegionTaxon(members)
+    local id, seen = nil, {}
+    for _, member in ipairs(members) do
+        local object, frameId = member.object, member.frame.frame_id
+        local key = safeTop(member)
+        local evidence = object.evidence_frame_ids
+        if not key or (id and key ~= id) or seen[frameId]
+            or object.identification_provenance ~= 'direct'
+            or type(evidence) ~= 'table' or #evidence ~= 1 or evidence[1] ~= frameId then
+            return nil
+        end
+        seen[frameId], id = true, key
+    end
+    return id
+end
+
+-- Candidate regions may contain gaps or duplicate boxes. No classification
+-- is inherited across inference tracks. Only independently safe, agreeing
+-- direct predictions can bypass manual review across those boundaries.
+local function regionUnit(members)
+    if #members < 2 then return nil end
+    local edgeRegion = type(members[1].object.review_group_id) == 'string'
+        and members[1].object.review_group_id:match('^edge%-region%-') ~= nil
+    if edgeRegion or members[1].object.geometry_clipped == true then
+        local previous
+        for _, member in ipairs(members) do
+            local object, frame = member.object, member.frame
+            local evidence = object.evidence_frame_ids
+            local box = object.bounding_box
+            if not geometry(frame, object, true)
+                or (edgeRegion and not (box[1] == 0 or box[2] == 0
+                    or box[3] == frame.width or box[4] == frame.height))
+                or (not edgeRegion and object.geometry_clipped ~= true)
+                or object.identification_provenance ~= 'direct'
+                or type(evidence) ~= 'table' or #evidence ~= 1 or evidence[1] ~= frame.frame_id
+                or type(object.conflict_evidence_frame_ids) ~= 'table'
+                or (previous and (member.frameIndex <= previous.frameIndex
+                    or member.frameIndex > previous.frameIndex + (edgeRegion and 3 or 1)
+                    or frame.coordinate_space ~= previous.frame.coordinate_space)) then
+                return nil
+            end
+            previous = member
+        end
+        return { kind = 'track', members = members, evidence = members,
+            candidateRegions = true, frameCount = #members, automaticBlocked = true }
+    end
+    local previous, direct, frameIds, count = nil, {}, {}, 0
+    for _, member in ipairs(members) do
+        local object, frameId = member.object, member.frame.frame_id
+        local evidence = object.evidence_frame_ids
+        if not geometry(member.frame, object)
+            or type(evidence) ~= 'table' or #evidence ~= 1
+            or type(object.conflict_evidence_frame_ids) ~= 'table'
+            or (previous and (member.frameIndex < previous.frameIndex
+                or member.frameIndex > previous.frameIndex + 3)) then
+            return nil
+        end
+        if object.identification_provenance == 'direct' and evidence[1] == frameId then
+            direct[evidenceKey(object, frameId)] = true
+        elseif object.identification_provenance ~= 'propagated'
+            or not direct[evidenceKey(object, evidence[1])] then
+            return nil
+        end
+        if not frameIds[frameId] then
+            frameIds[frameId] = true
+            count = count + 1
+        end
+        previous = member
+    end
+    local safe = trackUnit(members)
+    local sameTrack = true
+    for _, member in ipairs(members) do
+        if member.object.track_id ~= members[1].object.track_id then sameTrack = false end
+    end
+    local independent = independentRegionTaxon(members)
+    return {
+        kind = 'track', members = members, evidence = members,
+        candidateRegions = true, frameCount = count,
+        taxon = (safe and safe.taxon) or independent,
+        automaticBlocked = not ((safe and sameTrack) or independent),
+    }
+end
+
 -- Revalidate the result/frame association independently of the transport.
-function Review.units(manifest, results)
+function Review.units(manifest, results, allowManualTracks)
     assert(type(results) == 'table' and #results == #manifest.frames, 'Incomplete batch results')
     local members, tracks, frames, seen = {}, {}, {}, {}
     for index, spec in ipairs(manifest.frames) do
@@ -104,16 +225,28 @@ function Review.units(manifest, results)
                 frame = frame, frameIndex = index, object = object, objectIndex = objectIndex,
             }
             members[#members + 1] = member
-            local track = object.track_id
+            local groupId = object.review_group_id
+            local region = allowManualTracks and type(groupId) == 'string' and groupId ~= ''
+            local reviewId = object.review_track_id
+            local manualTrack = allowManualTracks and type(reviewId) == 'string' and reviewId ~= ''
+            local track = region and groupId or manualTrack and reviewId or object.track_id
             if type(track) == 'string' and track ~= '' then
-                tracks[track] = tracks[track] or {}
-                tracks[track][#tracks[track] + 1] = member
+                local key = (region and 'region:' or manualTrack and 'review:' or 'classification:') .. track
+                tracks[key] = tracks[key] or {}
+                tracks[key][#tracks[key] + 1] = member
             end
         end
     end
     local units, grouped, invalid = {}, {}, {}
-    for _, track in pairs(tracks) do
-        local unit = trackUnit(track)
+    for key, track in pairs(tracks) do
+        local unit
+        if key:sub(1, 7) == 'region:' then
+            unit = regionUnit(track)
+        elseif key:sub(1, 7) == 'review:' then
+            unit = manualTrackUnit(track)
+        else
+            unit = trackUnit(track)
+        end
         if unit then
             for _, member in ipairs(track) do grouped[member] = unit end
         elseif #track > 1 or track[1].object.identification_provenance == 'propagated' then
@@ -157,25 +290,26 @@ local function selectedDisposition(decision, member, track)
         if prediction and taxon(prediction) and (not track or decision.selectedPredictionIndex == 1) then
             return Identification.disposition({ action = 'ok', selectedPredictionIndex = index }, object)
         end
-    elseif not track and decision.action == 'manual' then
+    elseif decision.action == 'manual' then
         local p = decision.selectedPrediction
         if type(p) == 'table' and type(p.taxonomy) == 'table' and #p.taxonomy > 0
             and type(p.taxonomyRanks) == 'table' and #p.taxonomyRanks == #p.taxonomy then
             return Identification.disposition(decision, object)
         end
-    elseif not track and decision.action == 'not_an_animal' then
+    elseif decision.action == 'not_an_animal' then
         return Identification.disposition(decision, object)
     end
     return Identification.disposition({ action = 'unsure' }, object)
 end
 
 -- review(unit) must show verified image evidence before returning a decision.
--- Track-wide approval is deliberately limited to the common canonical top taxon.
--- A different taxon, rejection, or exception requires individual review.
+-- A manual taxonomy selection applies to the explicitly confirmed track only.
+-- Automatic acceptance remains limited to a common safe canonical prediction.
 function Review.collect(manifest, results, options)
     assert(options.mode == 'manual' or options.mode == 'assisted' or options.mode == 'automatic',
         'Invalid identification mode')
-    local units, frames = Review.units(manifest, results)
+    local units, frames = Review.units(manifest, results, options.mode ~= 'automatic')
+    local reviewPrompts = 0
     local function canceled()
         return options.isCanceled and options.isCanceled()
     end
@@ -191,15 +325,25 @@ function Review.collect(manifest, results, options)
             return { action = 'ok', selectedPredictionIndex = 1 }
         end
         if options.mode ~= 'automatic' and options.review then
+            reviewPrompts = reviewPrompts + 1
             return options.review(unit) or { action = 'unsure' }
         end
         return { action = 'unsure' }
     end
     local function assign(unit, decision)
+        if unit.kind == 'track' and not unit.taxon and decision.action == 'ok' then
+            decision = { action = 'unsure' }
+        end
         for _, member in ipairs(unit.members) do
             local frame = frames[member.frameIndex]
             frame.dispositions[member.objectIndex] = selectedDisposition(
                 decision, member, unit.kind == 'track')
+            if options.onDisposition then
+                options.onDisposition({
+                    frame_id = member.frame.frame_id, object_index = member.objectIndex,
+                    disposition = frame.dispositions[member.objectIndex],
+                })
+            end
         end
     end
     for _, unit in ipairs(units) do
@@ -248,7 +392,7 @@ function Review.collect(manifest, results, options)
         end
     end
     if canceled() then return nil, 'canceled' end
-    return { approved = approved, skipped = skipped }
+    return { approved = approved, skipped = skipped, reviewPrompts = reviewPrompts }
 end
 
 return Review

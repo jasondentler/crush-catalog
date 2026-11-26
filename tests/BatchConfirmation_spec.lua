@@ -47,12 +47,38 @@ describe('BatchConfirmation', function()
         })
         local result = confirmation.run(plan, function(manifest, options)
             assert.is_false(manifest.include_review_images)
+            assert.is_false(manifest.archive_evidence)
             local final = { results = { frame } }
             final.confirmations = options.onCompleted(final)
             return final
         end, { mode = 'automatic', threshold = 90 })
         assert.are.equal(1, #result.confirmations.approved)
         assert.are.equal('a', result.confirmations.approved[1].frame_id)
+    end)
+
+    it('records analysis without review crops or any automatic decision', function()
+        local plan, frame, preparation = fixture()
+        local confirmation = loadConfirmation(preparation, {
+            review = function() error('Unexpected manual review') end,
+        })
+        local events = {}
+        local result = confirmation.run(plan, function(manifest, options)
+            assert.is_false(manifest.include_review_images)
+            assert.is_true(manifest.include_review_groups)
+            assert.is_true(manifest.archive_evidence)
+            local final = { batchId = 'example', results = { frame } }
+            final.confirmations = options.onCompleted(final)
+            return final
+        end, {
+            analysisOnly = true, mode = 'manual',
+            onArchive = function(batchId, event)
+                assert.are.equal('example', batchId)
+                events[#events + 1] = event
+            end,
+        })
+        assert.is_nil(result.confirmations)
+        assert.are.equal(1, #events)
+        assert.are.equal('analysis_completed', events[1].kind)
     end)
 
     it('requests evidence for manual review while preserving the selected photo identity', function()
@@ -68,6 +94,7 @@ describe('BatchConfirmation', function()
         })
         local result = confirmation.run(plan, function(manifest, options)
             assert.is_true(manifest.include_review_images)
+            assert.is_false(manifest.archive_evidence)
             local final = { results = { frame } }
             final.confirmations = options.onCompleted(final, getter)
             return final

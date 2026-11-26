@@ -58,26 +58,37 @@ local function showTrack(unit, crops, options)
         local choices, paths = {}, {}
         for index, member in ipairs(unit.evidence) do
             paths[index] = writeCrop(context, crops[index])
-            choices[index] = { title = label(member, options), value = index }
+            choices[index] = { title = label(member, options) .. ' — Detection '
+                .. member.objectIndex .. ' — ' .. member.object.identification_provenance,
+                value = index }
         end
         props.selectedEvidence = 1
         props.imagePath = paths[1]
         props:addObserver('selectedEvidence', function()
             props.imagePath = paths[props.selectedEvidence]
         end)
-        local first = unit.members[1].object.predictions[1]
+        local first = (unit.members[1].object.predictions or {})[1]
+        local title = unit.taxon and first
+            and (Names.commonName(first) .. ' (' .. Names.scientificName(first) .. ')')
+            or 'Tracked subject — species requires manual identification'
         local lines = {}
         for _, member in ipairs(unit.members) do
             lines[#lines + 1] = label(member, options) .. ' — '
                 .. member.object.identification_provenance
         end
+        local frameCount = unit.frameCount or #unit.members
+        local dialogTitle = unit.candidateRegions
+            and string.format('Review %d detections in %d photographs', #unit.members, frameCount)
+            or string.format('Confirm tracked subject in %d photographs', frameCount)
+        local details = #lines <= 8 and table.concat(lines, '\n')
+            or lines[1] .. '\n…\n' .. lines[#lines]
         local action = LrDialogs.presentModalDialog {
-            title = string.format('Confirm tracked subject in %d photographs', #unit.members),
+            title = dialogTitle,
             contents = factory:column {
                 bind_to_object = props,
                 spacing = factory:control_spacing(),
                 factory:static_text {
-                    title = Names.commonName(first) .. ' (' .. Names.scientificName(first) .. ')',
+                    title = title,
                 },
                 factory:popup_menu {
                     items = choices, value = LrView.bind('selectedEvidence'), width = 520,
@@ -86,7 +97,13 @@ local function showTrack(unit, crops, options)
                     value = LrView.bind('imagePath'), width = 640, height = 480, frame_width = 1,
                 },
                 factory:static_text {
-                    title = table.concat(lines, '\n'), width = 640, height_in_lines = #lines,
+                    title = unit.candidateRegions
+                        and 'Inspect related regions before applying a decision to every detection.'
+                        or 'Inspect track members before confirming.',
+                    width = 640, height_in_lines = 2,
+                },
+                factory:static_text {
+                    title = details, width = 640, height_in_lines = #lines <= 8 and #lines or 3,
                 },
             },
             accessoryView = factory:row {
@@ -96,19 +113,35 @@ local function showTrack(unit, crops, options)
                 },
                 factory:spacer { fill_horizontal = 1 },
                 factory:push_button {
+                    title = 'Not an animal',
+                    action = function(button)
+                        LrDialogs.stopModalWithResult(button, 'reject')
+                    end,
+                },
+                factory:push_button {
+                    title = 'Choose species',
+                    action = function(button)
+                        LrDialogs.stopModalWithResult(button, 'choose')
+                    end,
+                },
+                factory:push_button {
                     title = 'Review individually',
                     action = function(button)
                         LrDialogs.stopModalWithResult(button, 'individual')
                     end,
                 },
             },
-            actionVerb = 'Confirm track',
+            actionVerb = unit.taxon and 'Confirm track' or 'Identify track',
             cancelVerb = 'Skip track',
             resizable = false,
         }
+        if action == 'choose' or (action == 'ok' and not unit.taxon) then
+            return { action = 'choose', evidenceIndex = props.selectedEvidence }
+        end
         if action == 'ok' then return { action = 'ok', selectedPredictionIndex = 1 } end
         if action == 'other' then return { action = 'stop' } end
         if action == 'individual' then return { action = 'individual' } end
+        if action == 'reject' then return { action = 'not_an_animal' } end
         return { action = 'unsure' }
     end)
 end
@@ -124,24 +157,52 @@ function Dialog.review(unit, options)
         end
         crops[index] = crop
     end
-    if unit.kind == 'track' then return showTrack(unit, crops, options) end
-    local member = unit.members[1]
+    local member, crop = unit.members[1], crops[1]
+    local selectingTrack = unit.kind == 'track'
+    if selectingTrack then
+        if options.onDialog then options.onDialog() end
+        local action = showTrack(unit, crops, options)
+        if action.action ~= 'choose' then return action end
+        member = unit.evidence[action.evidenceIndex]
+        crop = crops[action.evidenceIndex]
+    end
     local entry = options.items[member.frame.frame_id].item
     local object = member.object
     local summary = 'Identification: ' .. tostring(object.identification_provenance)
         .. '\nReview required: ' .. tostring(object.review_required)
     if type(object.reason) == 'string' then summary = summary .. '\n' .. object.reason end
     if #(object.conflict_evidence_frame_ids or {}) > 0 then
-        summary = summary .. '\nConflicting direct evidence; review independently.'
+        summary = summary .. '\nConflicting direct evidence: species predictions disagree.'
     end
-    return Individual.showBatchObject(entry.photo, member,
-        { bytes = crops[1].bytes, filename = 'crush-batch-evidence.jpg' }, {
+    if selectingTrack then
+        summary = string.format('Your choice applies to all %d detections in this group.\n',
+            #unit.members) .. summary
+    end
+    if options.onDialog then options.onDialog() end
+    local decision = Individual.showBatchObject(entry.photo, member,
+        { bytes = crop.bytes, filename = 'crush-batch-evidence.jpg' }, {
             imageCount = options.imageCount,
             commonNameLanguage = options.language,
             gpsCoordinates = entry.gps,
             searchFunction = options.searchFunction,
             batchReviewSummary = summary,
         })
+    if not selectingTrack then return decision end
+    if decision.action == 'ok' then
+        local prediction = (object.predictions or {})[decision.selectedPredictionIndex]
+        if prediction and type(prediction.canonical_taxon_id) == 'number' then
+            decision = { action = 'manual', selectedPrediction = {
+                taxonomy = prediction.taxonomy,
+                taxonomyRanks = prediction.taxonomy_rank_names,
+                commonNameTaxonomy = prediction.common_names,
+            } }
+        else
+            return { action = 'individual' }
+        end
+    end
+    if decision.action == 'manual' or decision.action == 'stop'
+        or decision.action == 'not_an_animal' then return decision end
+    return { action = 'unsure' }
 end
 
 Dialog.matchingCrop = matchingCrop

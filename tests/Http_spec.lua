@@ -100,6 +100,8 @@ describe('Http', function()
                 assert.are.equal(300, timeout)
                 assert.are.equal(#content, size)
                 assert.are.equal('application/octet-stream', headers[1].value)
+                assert.same({ field = 'Content-Length', value = tostring(#content) }, headers[2])
+                assert.are.equal(2, #headers)
                 local chunks = {}
                 while true do
                     local chunk = read()

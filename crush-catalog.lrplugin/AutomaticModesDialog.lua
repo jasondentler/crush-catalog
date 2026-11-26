@@ -23,84 +23,131 @@ function AutomaticModesDialog.show()
         local properties = LrBinding.makePropertyTable(context)
         local factory = LrView.osFactory()
 
-        properties.threshold = '90'
+        properties.threshold = '70'
         properties.processingScope = 'new'
-        properties.mode = 'assisted'
+        properties.mode = 'automatic'
+        properties.detectorThreshold = '0'
+        properties.cropDetailThreshold = '5'
+        properties.selectedTab = 'general'
 
         local function updateValidity()
             properties.valid = AutomaticModesLogic.validOptions(properties)
+                and AutomaticModesLogic.threshold(properties.detectorThreshold) ~= nil
+                and AutomaticModesLogic.threshold(properties.cropDetailThreshold) ~= nil
         end
 
         properties:addObserver('threshold', updateValidity)
         properties:addObserver('mode', updateValidity)
         properties:addObserver('processingScope', updateValidity)
+        properties:addObserver('detectorThreshold', updateValidity)
+        properties:addObserver('cropDetailThreshold', updateValidity)
         updateValidity()
 
         local result = LrDialogs.presentModalDialog {
             title = LOC '$$$/CrushCatalog/AutomaticModesTitle=Identify Selected Images',
-            contents = factory:column {
-                spacing = factory:control_spacing(),
+            contents = factory:tab_view {
                 bind_to_object = properties,
-                factory:group_box {
-                    title = LOC '$$$/CrushCatalog/ImagesToProcess=Images to Process',
-                    fill_horizontal = 1,
-                    factory:column {
-                        factory:radio_button {
-                            title = LOC '$$$/CrushCatalog/OnlyNewImages=Only New images',
-                            font = '<system>',
-                            value = LrView.bind('processingScope'),
-                            checked_value = 'new',
+                value = LrView.bind('selectedTab'),
+                factory:tab_view_item {
+                    title = 'General',
+                    identifier = 'general',
+                    factory:row {
+                        spacing = factory:control_spacing(),
+                        fill_horizontal = 1,
+                        factory:column {
+                            fill_horizontal = 1,
+                            spacing = factory:control_spacing(),
+                            factory:static_text {
+                                title = LOC '$$$/CrushCatalog/ImagesToProcess=Images to Process',
+                            },
+                            factory:view {
+                                place = 'vertical',
+                                margin = 4,
+                                spacing = factory:control_spacing(),
+                                factory:radio_button {
+                                    title = LOC '$$$/CrushCatalog/OnlyNewImages=Only New images',
+                                    value = LrView.bind('processingScope'),
+                                    checked_value = 'new',
+                                },
+                                factory:radio_button {
+                                    title = LOC '$$$/CrushCatalog/NewAndUnsure=New + Unsure',
+                                    value = LrView.bind('processingScope'),
+                                    checked_value = 'new_and_unsure',
+                                },
+                                factory:radio_button {
+                                    title = LOC '$$$/CrushCatalog/ReprocessAllImages=Reprocess All Images',
+                                    value = LrView.bind('processingScope'),
+                                    checked_value = 'all',
+                                },
+                            },
                         },
-                        factory:radio_button {
-                            title = LOC '$$$/CrushCatalog/NewAndUnsure=New + Unsure',
-                            font = '<system>',
-                            value = LrView.bind('processingScope'),
-                            checked_value = 'new_and_unsure',
-                        },
-                        factory:radio_button {
-                            title = LOC '$$$/CrushCatalog/ReprocessAllImages=Reprocess All Images',
-                            font = '<system>',
-                            value = LrView.bind('processingScope'),
-                            checked_value = 'all',
+                        factory:column {
+                            fill_horizontal = 1,
+                            spacing = factory:control_spacing(),
+                            factory:static_text {
+                                title = LOC '$$$/CrushCatalog/Mode=Mode:',
+                            },
+                            factory:view {
+                                place = 'vertical',
+                                margin = 4,
+                                spacing = factory:control_spacing(),
+                                factory:radio_button {
+                                    title = LOC '$$$/CrushCatalog/AutomaticMode=Automatic Mode',
+                                    value = LrView.bind('mode'),
+                                    checked_value = 'automatic',
+                                },
+                                factory:radio_button {
+                                    title = LOC '$$$/CrushCatalog/AssistedMode=Assisted Mode',
+                                    value = LrView.bind('mode'),
+                                    checked_value = 'assisted',
+                                },
+                                factory:radio_button {
+                                    title = LOC '$$$/CrushCatalog/ManualMode=Manual Mode',
+                                    value = LrView.bind('mode'),
+                                    checked_value = 'manual',
+                                },
+                            },
                         },
                     },
                 },
-                factory:group_box {
-                    title = LOC '$$$/CrushCatalog/Mode=Mode:',
-                    fill_horizontal = 1,
+                factory:tab_view_item {
+                    title = 'Advanced',
+                    identifier = 'advanced',
                     factory:column {
-                        factory:radio_button {
-                            title = LOC '$$$/CrushCatalog/AutomaticMode=Automatic Mode',
-                            font = '<system>',
-                            value = LrView.bind('mode'),
-                            checked_value = 'automatic',
+                        spacing = factory:control_spacing(),
+                        factory:row {
+                            factory:static_text {
+                                title = LOC '$$$/CrushCatalog/SpeciesConfidence=Species confidence',
+                                width = 140,
+                            },
+                            factory:edit_field {
+                                value = LrView.bind('threshold'),
+                                width_in_digits = 3,
+                            },
+                            factory:static_text { title = '%', width = 36 },
+                            factory:static_text { title = 'Minimum score to auto-accept.' },
                         },
-                        factory:radio_button {
-                            title = LOC '$$$/CrushCatalog/AssistedMode=Assisted Mode',
-                            font = '<system>',
-                            value = LrView.bind('mode'),
-                            checked_value = 'assisted',
+                        factory:row {
+                            factory:static_text { title = 'Detection confidence', width = 140 },
+                            factory:edit_field {
+                                value = LrView.bind('detectorThreshold'),
+                                width_in_digits = 3,
+                            },
+                            factory:static_text { title = '%', width = 36 },
+                            factory:static_text { title = 'Filter weak detections (0 = off).' },
                         },
-                        factory:radio_button {
-                            title = LOC '$$$/CrushCatalog/ManualMode=Manual Mode',
-                            font = '<system>',
-                            value = LrView.bind('mode'),
-                            checked_value = 'manual',
+                        factory:row {
+                            factory:static_text { title = 'Subject detail', width = 140 },
+                            factory:edit_field {
+                                value = LrView.bind('cropDetailThreshold'),
+                                width_in_digits = 3,
+                            },
+                            factory:static_text { title = '/100', width = 36 },
+                            factory:static_text { title = 'Filter low-detail crops (0 = off).' },
                         },
-                    },
-                },
-                factory:row {
-                    factory:static_text {
-                        title = LOC '$$$/CrushCatalog/ConfidenceThreshold=Confidence Threshold:',
-                        font = '<system>',
-                    },
-                    factory:edit_field {
-                        value = LrView.bind('threshold'),
-                        width_in_digits = 3,
-                    },
-                    factory:static_text {
-                        title = '%',
-                        font = '<system>',
+                        factory:static_text {
+                            title = 'Higher detection and detail filters may miss real subjects.',
+                        },
                     },
                 },
             },
@@ -119,6 +166,9 @@ function AutomaticModesDialog.show()
             threshold = AutomaticModesLogic.threshold(properties.threshold),
             processingScope = properties.processingScope,
             mode = properties.mode,
+            engine = 'batch',
+            detectorThreshold = AutomaticModesLogic.threshold(properties.detectorThreshold),
+            cropDetailThreshold = AutomaticModesLogic.threshold(properties.cropDetailThreshold),
         }
     end)
 end

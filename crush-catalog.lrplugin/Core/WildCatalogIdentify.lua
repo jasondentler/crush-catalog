@@ -94,6 +94,14 @@ function WildCatalogIdentify.buildRequest(imagePath, options, json)
 end
 
 function WildCatalogIdentify.parseResponse(response, json, httpLogic)
+    local status = tonumber(response.status
+        or (response.headers and response.headers.status)
+        or (response.normalizedHeaders and response.normalizedHeaders.status))
+    if status == 413 then
+        error('Image too large for identification (HTTP 413)', 0)
+    elseif status and (status < 200 or status >= 300) then
+        error('Identification request failed (HTTP ' .. tostring(status) .. ')', 0)
+    end
     local contentType = response.normalizedHeaders['content-type']
 
     if response.body == nil or response.body == '' then

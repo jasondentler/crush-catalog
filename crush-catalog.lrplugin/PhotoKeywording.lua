@@ -338,10 +338,10 @@ local function removeKeywords(photo, keywords)
     end
 end
 
-local function createAndAttach(photo, detections)
+local function createAndAttach(photo, detections, keywordCache, synonymUpdates)
     local catalog = photo.catalog
-    local keywordCache = {}
-    local synonymUpdates = {}
+    keywordCache = keywordCache or {}
+    synonymUpdates = synonymUpdates or {}
     local root = keyword(
         catalog,
         keywordCache,
@@ -491,6 +491,40 @@ function PhotoKeywording.record(photo, detections, reprocessing)
     end
 
     log('trace', 'Finished synonym updates for ' .. label)
+    return status
+end
+
+-- One undoable write gate for a finalized batch's approved photos. Any
+-- error inside this gate rolls back the metadata and keyword assignments.
+function PhotoKeywording.recordBatch(entries, validate, writeMetadata)
+    if #entries == 0 then return 'executed' end
+    local catalog = entries[1].photo.catalog
+    local cache, updates = {}, {}
+    local status = catalog:withWriteAccessDo('Apply Crush Catalog batch keywords', function()
+        assert(validate(), 'Batch canceled or photo changed before writing')
+        for _, entry in ipairs(entries) do
+            assert(entry.photo.catalog == catalog, 'Mixed catalogs in batch')
+            local existing = entry.reprocessing and existingCrushCatalogKeywords(entry.photo) or {}
+            removeKeywords(entry.photo, existing)
+            createAndAttach(entry.photo, entry.dispositions, cache, updates)
+            writeMetadata(entry)
+        end
+    end, { timeout = WRITE_TIMEOUT_SECONDS })
+    if status ~= 'executed' then error('Batch keyword transaction did not execute', 0) end
+
+    -- Newly created keyword handles cannot reliably be read until the first
+    -- transaction commits. Refresh shared synonyms separately, as in record().
+    -- Failure here does not mean the already committed assignments failed.
+    if #updates == 0 then return status end
+    local ok, synonymStatus = protectedCall(catalog.withWriteAccessDo, catalog,
+        'Update Crush Catalog batch synonyms', function()
+            for _, update in ipairs(updates) do
+                ensureSynonyms(update.keyword, update.synonyms)
+            end
+        end, { timeout = WRITE_TIMEOUT_SECONDS })
+    if not ok or synonymStatus ~= 'executed' then
+        return status, 'Keyword assignments committed; synonym update failed'
+    end
     return status
 end
 

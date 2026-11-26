@@ -75,6 +75,7 @@ function WildCatalogApi.identifyBatch(manifest, options)
     return Batch.run(manifest, {
         baseUrl = options.baseUrl or configuredBaseUrl(),
         json = JSON,
+        diagnostics = true,
         protect = LrTasks.pcall,
         resolveAsset = options.resolveAsset,
         isCanceled = options.isCanceled,
@@ -88,7 +89,7 @@ function WildCatalogApi.identifyBatch(manifest, options)
                 return response
             end,
             upload = function(url, path, headers)
-                return Http.upload(url, path, headers, LrTasks.pcall)
+                return Http.upload(url, path, headers, LrTasks.pcall, options.isUploadCanceled)
             end,
         },
     })

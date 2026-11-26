@@ -1,6 +1,7 @@
 local LrApplication = import 'LrApplication'
 local LrDate = import 'LrDate'
 local LrDialogs = import 'LrDialogs'
+local LrFunctionContext = import 'LrFunctionContext'
 local LrLocalization = import 'LrLocalization'
 local LrProgressScope = import 'LrProgressScope'
 local LrTasks = import 'LrTasks'
@@ -74,8 +75,12 @@ local function hasCrushCatalogMetadata(photo)
 end
 
 local function appendFailure(failures, metadata, failure)
+    local reason = tostring(failure)
+    if reason == 'payload_too_large' then
+        reason = 'Image too large for identification (server size limit)'
+    end
     local message = (metadata.originalFilename or metadata.path or '<unknown>')
-        .. ': ' .. tostring(failure)
+        .. ': ' .. reason
     failures[#failures + 1] = message
     trace('Identification failure: ' .. message)
 end
@@ -180,12 +185,14 @@ end
 
 local function waitWhilePaused(progress)
     local reportedPaused = false
+    local pauseStarted
 
     while progress:isPaused() and not progress:isCanceled() do
         if not reportedPaused then
             progress:setCaption(LOC '$$$/CrushCatalog/IdentifyPaused=Identification paused')
             trace('Identification paused')
             reportedPaused = true
+            pauseStarted = LrDate.currentTime()
         end
 
         LrTasks.sleep(0.2)
@@ -194,6 +201,133 @@ local function waitWhilePaused(progress)
     if reportedPaused and not progress:isCanceled() then
         trace('Identification resumed')
     end
+    return pauseStarted and math.max(0, LrDate.currentTime() - pauseStarted) or 0
+end
+
+local function identifyBatchPhotos(photos, options, progress, failures)
+    local Preparation = require 'BatchPreparation'
+    local Confirmation = require 'BatchConfirmation'
+    local Execution = assert(loadfile(pluginPath() .. '/Core/BatchExecution.lua'))()
+    local language = LrLocalization.currentLanguage()
+    local pausedSeconds = 0
+    local function canceled()
+        pausedSeconds = pausedSeconds + waitWhilePaused(progress)
+        return progress:isCanceled()
+    end
+    progress:setCaption('Preparing selected images')
+    local plans, excluded = Preparation.prepare(photos, {
+        language = language, isCanceled = canceled,
+    })
+    local finished = #excluded
+    local lastDone, lastTime = finished, LrDate.currentTime() - pausedSeconds
+    local recentDurations = {}
+    local function updateProgress(done)
+        done = math.min(#photos, math.max(lastDone, done))
+        local remaining = #photos - done
+        if done > lastDone then
+            local now = LrDate.currentTime() - pausedSeconds
+            if now > lastTime then
+                appendDuration(recentDurations, (now - lastTime) / (done - lastDone))
+            end
+            lastDone, lastTime = done, now
+        end
+        local caption = string.format('%d of %d - %d remaining', done, #photos, remaining)
+        local estimate = estimateRemaining(recentDurations, remaining)
+        if remaining > 0 then
+            caption = caption .. (estimate and (' - ' .. formatRemaining(estimate))
+                or ' - estimating time')
+        end
+        progress:setCaption(caption)
+        progress:setPortionComplete(done, #photos)
+    end
+    updateProgress(finished)
+    local previewCount, previewBlockers = 0, {}
+    for _, plan in ipairs(plans) do
+        for _, frame in ipairs(plan.manifest.frames) do
+            if #frame.representations == 2 then previewCount = previewCount + 1 end
+            for _, reason in ipairs(plan.items[frame.frame_id].previewBlockers or {}) do
+                previewBlockers[reason] = (previewBlockers[reason] or 0) + 1
+            end
+        end
+    end
+    trace('Batch preparation: plans=' .. #plans .. ', preview candidates=' .. previewCount
+        .. ', excluded=' .. #excluded)
+    traceJson('Preview eligibility blockers', previewBlockers)
+    local report = Execution.run(plans, excluded, {
+        protect = LrTasks.pcall,
+        isCanceled = canceled,
+        isWriteCanceled = function() return progress:isCanceled() end,
+        isCurrent = Preparation.isCurrent,
+        isReprocessing = hasCrushCatalogMetadata,
+        record = PhotoMetadata.recordBatch,
+        report = function(item, reason)
+            local metadata = { originalFilename = 'Batch' }
+            if item and item.photo then
+                metadata.originalFilename = firstAvailableMetadata(item.photo,
+                    'getFormattedMetadata', { 'preservedFileName', 'fileName' }) or '<unknown photo>'
+            end
+            appendFailure(failures, metadata, reason)
+        end,
+        confirm = function(plan)
+            updateProgress(finished)
+            if plan.manifest.execution_mode == 'burst' then
+                plan.manifest.burst_min_detection_confidence = (options.detectorThreshold or 0) / 100
+                plan.manifest.burst_min_crop_detail = (options.cropDetailThreshold or 0) / 100
+            end
+            return Confirmation.run(plan, WildCatalogApi.identifyBatch, {
+                mode = options.mode, threshold = options.threshold, language = language,
+                isCanceled = canceled,
+                onReviewPlan = function(planSummary) traceJson('Batch review plan', planSummary) end,
+                onProgress = function(done)
+                    updateProgress(finished + math.max(0, done))
+                end,
+            })
+        end,
+        onPlanFinished = function(plan)
+            finished = finished + #plan.manifest.frames
+            updateProgress(finished)
+        end,
+    })
+    if report.canceled then progress:cancel() end
+    traceJson('Batch execution report', report)
+    local summary = string.format(
+        'Selected: %d\nPreview candidates: %d\nApproved: %d\nWritten: %d\n'
+            .. 'Withheld: %d\nExcluded: %d\nFailed: %d',
+        #photos, previewCount, report.approved, report.written,
+        report.skipped, report.excluded, report.failed)
+    local reasons = {}
+    for reason, count in pairs(previewBlockers) do
+        reasons[#reasons + 1] = reason .. ': ' .. count
+    end
+    table.sort(reasons)
+    if #reasons > 0 then summary = summary .. '\n\nPreview blockers:\n' .. table.concat(reasons, '\n') end
+    if #failures > 0 then
+        summary = summary .. '\n\nIssues:\n' .. table.concat(failures, '\n')
+    end
+    if report.canceled then
+        summary = summary .. '\nCanceled; earlier completed writes remain.'
+    end
+    if #report.warnings > 0 then
+        summary = summary .. '\n\nWarnings:\n' .. table.concat(report.warnings, '\n')
+    end
+    if #report.operations > 0 then
+        local totals = {}
+        for _, counts in ipairs(report.operations) do
+            for key, value in pairs(counts) do
+                if type(value) == 'number' then totals[key] = (totals[key] or 0) + value end
+            end
+        end
+        summary = summary .. string.format(
+            '\n\nData received: %.1f MB\nFull-quality decodes: %d\n'
+                .. 'Classifier inputs: %d\nReused classifications: %d',
+            (totals.received_bytes or 0) / 1000000, totals.full_decode_attempts or 0,
+            totals.classifier_inputs or 0, totals.reused_classifier_inputs or 0)
+    end
+    summary = summary .. string.format(
+        '\nReview prompts: %d\nFiltered detections: %d (confidence: %d, detail: %d)',
+        report.reviewPrompts or 0, report.suppressedDetections or 0,
+        report.suppressedLowConfidence or 0, report.suppressedLowDetail or 0)
+    LrDialogs.message('Image identification', summary, #failures > 0 and 'warning' or 'info')
 end
 
 local function identifySelectedPhotos()
@@ -250,6 +384,17 @@ local function identifySelectedPhotos()
     local progress = createProgress()
     local failures = {}
     local recentDurations = {}
+
+    if options.engine == 'batch' then
+        local succeeded, failure = LrTasks.pcall(identifyBatchPhotos, photos, options, progress, failures)
+        if not succeeded and failure ~= 'Batch canceled' then
+            appendFailure(failures, { originalFilename = 'Batch' }, failure)
+        end
+        progress:done()
+        -- A completed run already includes every issue in its summary.
+        if not succeeded then showFailures(failures) end
+        return
+    end
 
     for index, photo in ipairs(photos) do
         waitWhilePaused(progress)
@@ -360,7 +505,7 @@ local function identifySelectedPhotos()
     trace('Finished identification; failures=' .. tostring(#failures))
 end
 
-LrTasks.startAsyncTask(identifySelectedPhotos)
+LrFunctionContext.postAsyncTaskWithContext('identifySelectedPhotos', identifySelectedPhotos)
 
 return {
     estimateRemaining = estimateRemaining,

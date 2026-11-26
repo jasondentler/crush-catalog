@@ -5,6 +5,8 @@ describe('IdentifySelectedPhotosTask', function()
     local originalDialog
     local originalLoc
     local originalPhotoMetadata
+    local originalPreparation
+    local originalConfirmation
 
     before_each(function()
         originalImport = _G.import
@@ -12,6 +14,8 @@ describe('IdentifySelectedPhotosTask', function()
         originalAutomaticModesDialog = package.loaded.AutomaticModesDialog
         originalDialog = package.loaded.IdentificationDialog
         originalPhotoMetadata = package.loaded.PhotoMetadata
+        originalPreparation = package.loaded.BatchPreparation
+        originalConfirmation = package.loaded.BatchConfirmation
         originalLoc = _G.LOC
         _G.LOC = function(value)
             return value:match('=(.*)$') or value
@@ -24,6 +28,8 @@ describe('IdentifySelectedPhotosTask', function()
         package.loaded.AutomaticModesDialog = originalAutomaticModesDialog
         package.loaded.IdentificationDialog = originalDialog
         package.loaded.PhotoMetadata = originalPhotoMetadata
+        package.loaded.BatchPreparation = originalPreparation
+        package.loaded.BatchConfirmation = originalConfirmation
         _G.LOC = originalLoc
     end)
 
@@ -187,6 +193,9 @@ describe('IdentifySelectedPhotosTask', function()
                         return value
                     end,
                 },
+                LrFunctionContext = {
+                    postAsyncTaskWithContext = function(_, callback) task = callback end,
+                },
                 LrLocalization = { currentLanguage = function() return 'en-US' end },
                 LrProgressScope = function() return progress end,
                 LrTasks = {
@@ -313,5 +322,80 @@ describe('IdentifySelectedPhotosTask', function()
         component.identifySelectedPhotos()
         assert.are.equal(1, #identifyCalls)
         assert.is_true(progress.wasCanceled)
+
+
+        -- Multi-photo identification uses the production route without diagnostics.
+        local plan = {
+            manifest = { frames = {
+                { frame_id = 'a', representations = { {}, {} } },
+                { frame_id = 'b', representations = { {} } },
+            } },
+            items = { a = { item = { photo = photo } }, b = { item = { photo = {} } } },
+        }
+        package.loaded.BatchPreparation = {
+            prepare = function(photos, options)
+                assert.are.equal(2, #photos)
+                assert.are.equal('en-US', options.language)
+                return { plan }, {}
+            end,
+            isCurrent = function() return true end,
+        }
+        package.loaded.BatchConfirmation = {
+            run = function(receivedPlan, _, options)
+                assert.are.equal(plan, receivedPlan)
+                assert.are.equal('automatic', options.mode)
+                assert.is_nil(receivedPlan.manifest.archive_run_id)
+                assert.is_nil(options.onArchive)
+                assert.is_nil(options.analysisOnly)
+                return {
+                    results = { { frame_id = 'a', status = 'identified' },
+                        { frame_id = 'b', status = 'no_detection' } },
+                    confirmations = { approved = {
+                        { frame_id = 'a', dispositions = { { disposition = 'confirmed' } } },
+                    } },
+                }
+            end,
+        }
+        local batchWrites = 0
+        package.loaded.PhotoMetadata.recordBatch = function(entries, validate)
+            batchWrites = batchWrites + 1
+            assert.are.equal(1, #entries)
+            assert.are.equal(photo, entries[1].photo)
+            assert.is_true(validate())
+            return 'executed'
+        end
+        batchOptions.engine = 'batch'
+        identifyCalls = {}
+        component.identifySelectedPhotos()
+        assert.are.equal('2 of 2 - 0 remaining', progress.caption)
+        assert.are.equal(0, #identifyCalls)
+        assert.are.equal(1, batchWrites)
+
+        -- A failed frame must appear in the final summary with its filename.
+        plan.items.b.item.photo = photo
+        local confirm = package.loaded.BatchConfirmation.run
+        package.loaded.BatchConfirmation.run = function(...)
+            local final = confirm(...)
+            final.results[2].status = 'failed'
+            final.results[2].error_code = 'payload_too_large'
+            return final
+        end
+        component.identifySelectedPhotos()
+        assert.are.equal(2, batchWrites)
+        assert.matches('Failed: 1', messages[#messages].message, 1, true)
+        assert.matches('Withheld: 0', messages[#messages].message, 1, true)
+        assert.matches('bird.jpg: Image too large for identification', messages[#messages].message, 1, true)
+
+        -- Single-image transport failures must not reach confirmation or metadata writes.
+        selectedPhotos = { photo }
+        local recordCount, dialogCount = #recordCalls, #dialogCalls
+        package.loaded.WildCatalogApi.identify = function()
+            error('Image too large for identification (HTTP 413)', 0)
+        end
+        component.identifySelectedPhotos()
+        assert.are.equal(recordCount, #recordCalls)
+        assert.are.equal(dialogCount, #dialogCalls)
+        assert.matches('bird.jpg: Image too large for identification (HTTP 413)',
+            messages[#messages].message, 1, true)
     end)
 end)

@@ -102,6 +102,26 @@ describe('WildCatalogBatch', function()
         assert.is_nil(calls[1].body:find('/private/', 1, true))
     end)
 
+    it('reports finalized counts from compact progress without intermediate results', function()
+        local initial = progress({ asset('f1', 'preview') })
+        initial.finalized_frame_count = 0
+        local nextProgress = progress({ asset('f2', 'full') })
+        nextProgress.finalized_frame_count = 1
+        local options = fixture({
+            reply(201, initial),
+            reply(200, nextProgress),
+            reply(200, progress({}, { result('f1'), result('f2') }, {}, 'completed')),
+        })
+        local counts = {}
+        options.onProgress = function(done, total)
+            assert.are.equal(2, total)
+            counts[#counts + 1] = done
+        end
+        local final = Batch.run(manifest(), options)
+        assert.same({ 0, 1 }, counts)
+        assert.are.equal(2, #final.results)
+    end)
+
     it('rejects undeclared requests before reading an asset and cleans up', function()
         local options, calls = fixture({
             reply(201, progress({ asset('other', 'full') })),
@@ -183,8 +203,9 @@ describe('WildCatalogBatch', function()
         })
         local request = manifest()
         request.include_review_images = true
-        local badBox = false
+        local fetches = 0
         options.transport.get = function(url, headers)
+            fetches = fetches + 1
             assert.are.equal(1, #calls)
             assert.are.equal('https://example.test/v1/batches/session-1/frames/f1'
                 .. '/objects/1/review-image', url)
@@ -196,16 +217,17 @@ describe('WildCatalogBatch', function()
                     ['x-frame-id'] = 'f1',
                     ['x-object-index'] = '1',
                     ['x-coordinate-space'] = first.coordinate_space,
-                    ['x-bounding-box'] = badBox and '[1,2,3,5]' or '[1,2,3,4]',
+                    ['x-bounding-box'] = '[1,2,3,4]',
                 },
             }
         end
         options.onCompleted = function(final, getCrop)
             local member = { frameIndex = 1, frame = final.results[1],
                 objectIndex = 1, object = final.results[1].objects[1] }
+            assert.are.equal('DELETE', calls[2].method)
             assert.are.equal('jpeg bytes', getCrop(member).bytes)
-            badBox = true
-            assert.is_nil(getCrop(member))
+            assert.are.equal('jpeg bytes', getCrop(member).bytes)
+            assert.are.equal(1, fetches)
             member.objectIndex = 2
             assert.is_nil(getCrop(member))
             return { approved = {} }
@@ -213,6 +235,45 @@ describe('WildCatalogBatch', function()
         local response = Batch.run(request, options)
         assert.same({ approved = {} }, response.confirmations)
         assert.are.equal('DELETE', calls[2].method)
+    end)
+
+    it('reports missing or mismatched crops and accepts an already absent session', function()
+        local first = result('f1', 'identified')
+        first.objects = { { bounding_box = { 1, 2, 3, 4 } } }
+        first.coordinate_space = 'original:supplied_preview'
+        local options = fixture({
+            reply(201, progress({}, { first, result('f2') }, {}, 'completed')),
+        })
+        local request = manifest()
+        request.include_review_images = true
+        local send = options.transport.request
+        options.transport.request = function(method, ...)
+            if method == 'DELETE' then
+                return { status = 404, body = '{"error":{"code":"batch_not_found"}}' }
+            end
+            return send(method, ...)
+        end
+        options.transport.get = function()
+            return {
+                status = 200, body = 'jpeg bytes',
+                normalizedHeaders = {
+                    ['content-type'] = 'image/jpeg',
+                    ['x-frame-id'] = 'f1',
+                    ['x-object-index'] = '1',
+                    ['x-coordinate-space'] = first.coordinate_space,
+                    ['x-bounding-box'] = '[1,2,3,5]',
+                },
+            }
+        end
+        options.onCompleted = function(final, getCrop)
+            local member = { frameIndex = 1, frame = final.results[1],
+                objectIndex = 1, object = final.results[1].objects[1] }
+            assert.is_nil(getCrop(member))
+            return { approved = {} }
+        end
+        local response = Batch.run(request, options)
+        assert.are.equal(1, response.missingReviewImages)
+        assert.is_false(response.cleanupPending)
     end)
 
     it('releases the completed session if review is canceled', function()
@@ -226,6 +287,38 @@ describe('WildCatalogBatch', function()
             Batch.run(manifest(), options)
         end, 'Batch canceled')
         assert.are.equal('DELETE', calls[2].method)
+    end)
+
+    it('names oversized files when the server rejects the declared upload size', function()
+        local request = manifest()
+        request.frames[1].representations[2].byte_count = 120000000
+        request.frames[2].representations[1].byte_count = 50000000
+        local options = fixture({ reply(413, { error = {
+            code = 'payload_too_large',
+            message = 'Uploaded file exceeds the configured size limit of 100,000,000 bytes.',
+        } }) })
+        assert.has_error(function()
+            Batch.run(request, options)
+        end, 'Image too large for identification (HTTP 413): source.ARW; no results returned')
+    end)
+
+    it('reports an oversized requested asset and cleans up the session', function()
+        local options, calls = fixture({
+            reply(201, progress({ asset('f1', 'full') })),
+            reply(413, {}),
+        })
+        assert.has_error(function()
+            Batch.run(manifest(), options)
+        end, 'Image too large for identification (HTTP 413): source.ARW; no results returned')
+        assert.are.equal('DELETE', calls[#calls].method)
+    end)
+
+    it('reports only safe request stage and status when diagnostics are enabled', function()
+        local options = fixture({ reply(400, { detail = 'private backend response' }) })
+        options.diagnostics = true
+        assert.has_error(function()
+            Batch.run(manifest(), options)
+        end, 'Batch identification failed at create (HTTP 400); no results returned')
     end)
 
 end)

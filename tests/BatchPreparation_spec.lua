@@ -106,4 +106,22 @@ describe('BatchPreparation', function()
         end, 'Transport failed')
         assert.are.equal(3, count)
     end)
+    it('offers previews without a Lightroom camera serial and partitions by model', function()
+        local preparation = loadPreparation()
+        local a, _, first = photo('a', '2026-11-23T12:34:56.123')
+        local b, _, second = photo('b', '2026-11-23T12:34:56.456')
+        local d, _, third = photo('d', '2026-11-23T12:34:56.789')
+        first.cameraSerialNumber = nil
+        second.cameraSerialNumber = nil
+        third.cameraSerialNumber = nil
+        third.cameraModel = 'Other'
+        local plans = preparation.prepare({ a, b, d })
+        local frames = plans[1].manifest.frames
+        assert.are.equal('burst', plans[1].manifest.execution_mode)
+        assert.is_nil(frames[1].camera_id)
+        assert.are.equal(2, #frames[1].representations)
+        assert.are.equal(frames[1].session_id, frames[2].session_id)
+        assert.are_not.equal(frames[1].session_id, frames[3].session_id)
+    end)
+
 end)

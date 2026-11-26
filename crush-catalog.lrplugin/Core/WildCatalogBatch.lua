@@ -90,6 +90,21 @@ function Batch.run(manifest, options)
     local protect = options.protect or pcall
     local base = options.baseUrl:gsub('/+$', ''):gsub('/identify$', '') .. '/v1/batches'
     local batchUrl, token
+    local stage, status = 'create', nil
+    local requestedFilename, sizeLimit
+    local function observed(response, expected)
+        status = type(response) == 'table' and tonumber(response.status) or nil
+        if status == 413 then
+            local ok, body = pcall(json.decode, json, response.body)
+            if ok and type(body) == 'table' and type(body.error) == 'table'
+                and body.error.code == 'payload_too_large'
+                and type(body.error.message) == 'string' then
+                local limit = body.error.message:match('configured size limit of ([%d,]+) bytes')
+                if limit then sizeLimit = tonumber((limit:gsub(',', ''))) end
+            end
+        end
+        return decode(response, expected, json)
+    end
 
     local function checkCanceled()
         if options.isCanceled and options.isCanceled() then
@@ -97,9 +112,8 @@ function Batch.run(manifest, options)
         end
     end
 
-    -- The review callback runs while the completed session is still leased
-    -- by its secret token. Evidence URLs cannot be supplied by the server or UI.
-    local function reviewCrop(member, final)
+    -- Evidence URLs cannot be supplied by the server or UI.
+    local function fetchCrop(member, final)
         if not manifest.include_review_images or not transport.get then return nil end
         checkCanceled()
         local frame = final.results[member.frameIndex]
@@ -137,10 +151,67 @@ function Batch.run(manifest, options)
         }
     end
 
+    local function releaseSession()
+        if not batchUrl or not token then return true end
+        local ok, response = protect(transport.request, 'DELETE', batchUrl, '', headers(token))
+        if ok and type(response) == 'table' then
+            if response.status == 204 then
+                batchUrl, token = nil, nil
+                return true
+            end
+            if response.status == 404 then
+                local decoded, payload = pcall(json.decode, json, response.body)
+                if decoded and type(payload) == 'table' and type(payload.error) == 'table'
+                    and payload.error.code == 'batch_not_found' then
+                    batchUrl, token = nil, nil
+                    return true
+                end
+            end
+        end
+        return false
+    end
+
+    -- Materialize bounded review evidence before opening any modal dialog.
+    -- A long review or server restart must not invalidate locally fetched crops.
+    local function cacheReview(final)
+        local crops, bytes, attempts, missing = {}, 0, 0, 0
+        if manifest.include_review_images then
+            for frameIndex, frame in ipairs(final.results) do
+                for objectIndex, object in ipairs(frame.objects) do
+                    local crop
+                    if attempts < 2048 and bytes < 64 * 1024 * 1024 then
+                        attempts = attempts + 1
+                        crop = fetchCrop({
+                            frameIndex = frameIndex, frame = frame,
+                            objectIndex = objectIndex, object = object,
+                        }, final)
+                    end
+                    if crop and bytes + #crop.bytes <= 64 * 1024 * 1024 then
+                        crops[frameIndex .. ':' .. objectIndex] = crop
+                        bytes = bytes + #crop.bytes
+                    else
+                        missing = missing + 1
+                    end
+                end
+            end
+        end
+        final.missingReviewImages = missing
+        return function(member)
+            checkCanceled()
+            local frame = final.results[member.frameIndex]
+            local index = member.objectIndex
+            if frame and frame == member.frame and type(index) == 'number'
+                and frame.objects[index] == member.object then
+                return crops[member.frameIndex .. ':' .. index]
+            end
+        end
+    end
+
     local ok, result = protect(function()
         checkCanceled()
-        local progress = decode(transport.request('POST', base, json:encode(manifest),
-            headers()), 201, json)
+        local progress = observed(transport.request('POST', base, json:encode(manifest),
+            headers()), 201)
+        stage = 'validate create response'
         requireCondition(identifier(progress.batch_id)
             and type(progress.batch_token) == 'string' and #progress.batch_token <= 128
             and progress.batch_token:match('^[a-zA-Z0-9_%-]+$') ~= nil,
@@ -152,26 +223,36 @@ function Batch.run(manifest, options)
         -- or discover a full-quality fallback. Bound malformed-server loops.
         for _ = 1, #manifest.frames * 5 + 2 do
             checkCanceled()
+            stage = 'validate progress'
             validateProgress(progress, batchId)
             if progress.status == 'completed' then
+                stage = 'finalize results'
                 local final = {
+                    batchId = batchId,
                     results = finalResults(progress, manifest, frames),
                     operationCounts = progress.operation_counts,
                 }
                 if options.onCompleted then
-                    final.confirmations = options.onCompleted(final, function(member)
-                        return reviewCrop(member, final)
-                    end)
+                    stage = 'download review evidence'
+                    local getCrop = cacheReview(final)
+                    releaseSession()
+                    stage = 'confirmation'
+                    final.confirmations = options.onCompleted(final, getCrop)
                     checkCanceled()
                 end
                 return final
             end
             if options.onProgress then
-                options.onProgress(#progress.results - #progress.provisional_frame_ids, #manifest.frames)
+                local done = progress.finalized_frame_count
+                if done == nil then done = #progress.results - #progress.provisional_frame_ids end
+                requireCondition(type(done) == 'number' and done >= 0
+                    and done <= #manifest.frames and done % 1 == 0, 'Invalid progress count')
+                options.onProgress(done, #manifest.frames)
             end
             if #progress.requested == 0 then
-                progress = decode(transport.request('POST', batchUrl .. '/advance',
-                    '', headers(token)), 200, json)
+                stage, status = 'advance', nil
+                progress = observed(transport.request('POST', batchUrl .. '/advance',
+                    '', headers(token)), 200)
             else
                 local request = progress.requested[1]
                 local id, rep = request.frame_id, request.representation_id
@@ -182,14 +263,25 @@ function Batch.run(manifest, options)
                 requireCondition(not resolved[key], 'Server repeated a resolved request')
                 resolved[key] = true
                 local url = batchUrl .. '/frames/' .. id .. '/representations/' .. rep
+                stage, status = 'resolve ' .. request.role, nil
                 local path = options.resolveAsset(id, rep, request.role)
                 checkCanceled()
                 if path then
-                    progress = decode(transport.upload(url, path,
-                        headers(token, 'application/octet-stream')), 200, json)
+                    stage = 'upload ' .. request.role
+                    requestedFilename = nil
+                    for _, frame in ipairs(manifest.frames) do
+                        if frame.frame_id == id then
+                            for _, spec in ipairs(frame.representations) do
+                                if spec.representation_id == rep then requestedFilename = spec.filename end
+                            end
+                        end
+                    end
+                    progress = observed(transport.upload(url, path,
+                        headers(token, 'application/octet-stream')), 200)
                 else
-                    progress = decode(transport.request('POST', url .. '/unavailable',
-                        '', headers(token)), 200, json)
+                    stage = 'declare unavailable ' .. request.role
+                    progress = observed(transport.request('POST', url .. '/unavailable',
+                        '', headers(token)), 200)
                 end
             end
         end
@@ -197,15 +289,37 @@ function Batch.run(manifest, options)
     end)
 
     -- Always attempt to release server assets, even after cancellation/error.
-    local cleaned = true
-    if batchUrl and token then
-        local cleanupOk, response = protect(transport.request, 'DELETE', batchUrl, '', headers(token))
-        cleaned = cleanupOk and type(response) == 'table' and response.status == 204
-    end
+    local cleaned = releaseSession()
     if not ok then
         -- Do not expose backend response bodies, credentials, or paths in errors.
         if result == 'Batch canceled' then
             error(result, 0)
+        end
+        if status == 413 then
+            local names = {}
+            if stage == 'create' and sizeLimit then
+                for _, frame in ipairs(manifest.frames) do
+                    for _, spec in ipairs(frame.representations) do
+                        if type(spec.byte_count) == 'number' and spec.byte_count > sizeLimit
+                            and (manifest.execution_mode == 'burst' or spec.role == 'full') then
+                            names[#names + 1] = spec.filename or frame.frame_id
+                        end
+                    end
+                end
+            elseif stage:match('^upload ') and requestedFilename then
+                names[1] = requestedFilename
+            end
+            local message = 'Image or upload exceeds server size limit (HTTP 413)'
+            if #names > 0 then message = 'Image too large for identification (HTTP 413): '
+                .. table.concat(names, ', ') end
+            error(message .. '; no results returned', 0)
+        end
+        if status == 507 then
+            error('Insufficient disk space; saved analysis can be resumed.', 0)
+        end
+        if options.diagnostics then
+            error('Batch identification failed at ' .. stage .. ' (HTTP '
+                .. tostring(status or 'no response') .. '); no results returned', 0)
         end
         error('Batch identification failed; no results returned', 0)
     end

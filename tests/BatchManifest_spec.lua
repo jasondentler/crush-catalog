@@ -75,7 +75,7 @@ describe('BatchManifest', function()
     it('uses independent full assets for imprecise, missing or invalid sequence evidence', function()
         local a, b, c, d = item(1), item(2), item(3), item(4)
         a.capturedAt = '2026-11-23T12:34:56'
-        b.cameraKey = nil
+        b.sessionKey = nil
         c.gps = nil
         d.capturedAt = '2026-02-30T12:34:56.123Z'
         local options = callbacks()
@@ -88,6 +88,26 @@ describe('BatchManifest', function()
         assert.are.equal(0, manifest.frames[1].fractional_digits)
         assert.is_false(manifest.frames[3].gps_absent)
         assert.is_nil(manifest.frames[4].captured_at)
+        assert.same({ 'Subsecond time unavailable' }, plans[1].items['photo-1'].previewBlockers)
+        assert.same({ 'Sequence identity unavailable' }, plans[1].items['photo-2'].previewBlockers)
+        assert.same({ 'GPS context unknown' }, plans[1].items['photo-3'].previewBlockers)
+    end)
+
+    it('resumes only matching archived originals and preserves sequence breaks', function()
+        local options = callbacks()
+        local a, b, c = item(1), item(2), item(3)
+        local prior = Manifest.prepare({ a, b, c }, options)
+        options.resumeFrames = {
+            [b.photoId] = { frame = prior[1].manifest.frames[2], batch_id = 'old-batch' },
+            [c.photoId] = { frame = prior[1].manifest.frames[3], batch_id = 'old-batch' },
+        }
+        c.byteCount = c.byteCount + 1
+        local plans, excluded, resumed = Manifest.prepare({ a, b, c }, options)
+        assert.are.equal(2, #plans)
+        assert.are.equal(0, #excluded)
+        assert.same({ { frame_id = b.photoId, batch_id = 'old-batch' } }, resumed)
+        assert.are.equal(a.photoId, plans[1].manifest.frames[1].frame_id)
+        assert.are.equal(c.photoId, plans[2].manifest.frames[1].frame_id)
     end)
 
     it('supports verified GPS absence without assuming it from missing metadata', function()

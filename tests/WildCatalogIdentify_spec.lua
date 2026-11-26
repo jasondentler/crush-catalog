@@ -89,6 +89,26 @@ describe('WildCatalogIdentify', function()
         assert.are.equal('detected-1.jpg', response.detectedImages[1].filename)
     end)
 
+    it('rejects HTTP 413 before parsing an error response as identification results', function()
+        for _, body in ipairs({ '', '{"error":{"code":"payload_too_large"}}' }) do
+            assert.has_error(function()
+                Identify.parseResponse({
+                    body = body, headers = { status = 413 },
+                    normalizedHeaders = { ['content-type'] = 'application/json' },
+                }, JSON, HttpLogic)
+            end, 'Image too large for identification (HTTP 413)')
+        end
+    end)
+
+    it('rejects other HTTP failures instead of accepting error JSON', function()
+        assert.has_error(function()
+            Identify.parseResponse({
+                body = '{}', headers = { status = '503' },
+                normalizedHeaders = { ['content-type'] = 'application/json' },
+            }, JSON, HttpLogic)
+        end, 'Identification request failed (HTTP 503)')
+    end)
+
     it('accepts an application/json response without detected images', function()
         local response = Identify.parseResponse({
             body = '{"results":[]}',
