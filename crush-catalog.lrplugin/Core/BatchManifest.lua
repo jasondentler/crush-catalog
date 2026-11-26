@@ -136,6 +136,16 @@ local function build(items, options)
         end
         return true
     end
+    -- Local transport receives the original, never a disposable preview.
+    function plan.resolveLocalSource(frameId, representationId, role)
+        if closed then return nil end
+        local entry = assets[frameId]
+        if not entry or not options.isCurrent(entry.item) then return nil end
+        if representationId == 'full' and role == 'full' then return entry.item.path end
+        if representationId == 'preview' and role == 'preview' and entry.preview then
+            return entry.item.path
+        end
+    end
     function plan.resolveAsset(frameId, representationId, role)
         if closed then return nil end
         -- Batch.run uploads synchronously. At the next request, the prior

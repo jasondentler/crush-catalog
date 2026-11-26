@@ -333,6 +333,7 @@ describe('IdentifySelectedPhotosTask', function()
             items = { a = { item = { photo = photo } }, b = { item = { photo = {} } } },
         }
         package.loaded.BatchPreparation = {
+            renderRun = function() return { finish = function() return true end } end,
             prepare = function(photos, options)
                 assert.are.equal(2, #photos)
                 assert.are.equal('en-US', options.language)

@@ -322,3 +322,144 @@ describe('WildCatalogBatch', function()
     end)
 
 end)
+
+
+describe('WildCatalogBatch local transport', function()
+    it('uses local registration then uploads once if the asset is requested again', function()
+        local request = asset('f1', 'full')
+        local options, calls = fixture({
+            reply(201, progress({ request })),
+            reply(200, progress()),
+            reply(200, progress({ request })),
+            reply(200, progress()),
+            reply(200, progress({}, { result('f1'), result('f2') }, {}, 'completed')),
+        })
+        local attempts = 0
+        options.localSession = function()
+            return function(url, path, role, _, headers)
+                attempts = attempts + 1
+                assert.are.equal('full', role)
+                return options.transport.request('POST', url .. '/local', path, headers)
+            end
+        end
+        local final = Batch.run(manifest(), options)
+        assert.are.equal(2, #final.results)
+        assert.are.equal(1, attempts)
+        assert.are.equal('POST', calls[2].method)
+        assert.are.equal('PUT', calls[4].method)
+    end)
+
+    it('uploads after a rejected local registration', function()
+        local options, calls = fixture({
+            reply(201, progress({ asset('f1', 'full') })),
+            reply(404, {}),
+            reply(200, progress({}, { result('f1'), result('f2') }, {}, 'completed')),
+        })
+        options.localSession = function()
+            return function(url, path, _role, _batchUrl, headers)
+                return options.transport.request('POST', url .. '/local', path, headers)
+            end
+        end
+        Batch.run(manifest(), options)
+        assert.are.equal('PUT', calls[3].method)
+    end)
+
+    it('uploads if negotiation fails', function()
+        local options, calls = fixture({
+            reply(201, progress({ asset('f1', 'full') })),
+            reply(200, progress({}, { result('f1'), result('f2') }, {}, 'completed')),
+        })
+        options.localSession = function() error('unavailable') end
+        Batch.run(manifest(), options)
+        assert.are.equal('PUT', calls[2].method)
+    end)
+end)
+
+
+describe('WildCatalogBatch local embedded previews', function()
+    it('avoids preview materialization when a RAW reference succeeds', function()
+        local options, calls = fixture({
+            reply(201, progress({ asset('f1', 'preview') })),
+            reply(200, progress({}, { result('f1'), result('f2') }, {}, 'completed')),
+        })
+        options.resolveLocalSource = function()
+            return '/photos/bird.ARW'
+        end
+        options.resolveAsset = function()
+            error('must not generate a preview')
+        end
+        options.localSession = function()
+            return function(url, path, role, _, headers)
+                assert.are.equal('preview', role)
+                assert.are.equal('/photos/bird.ARW', path)
+                return options.transport.request('POST', url .. '/local', path, headers)
+            end
+        end
+        Batch.run(manifest(), options)
+        assert.are.equal(3, #calls)
+        assert.are.equal('POST', calls[2].method)
+    end)
+
+    it('materializes the preview only when local registration is rejected', function()
+        local options, calls = fixture({
+            reply(201, progress({ asset('f1', 'preview') })),
+            reply(404, {}),
+            reply(200, progress({}, { result('f1'), result('f2') }, {}, 'completed')),
+        })
+        options.resolveLocalSource = function()
+            return '/photos/bird.ARW'
+        end
+        options.localSession = function()
+            return function(url, path, role, _, headers)
+                assert.are.equal('preview', role)
+                return options.transport.request('POST', url .. '/local', path, headers)
+            end
+        end
+        Batch.run(manifest(), options)
+        assert.are.equal('PUT', calls[3].method)
+        assert.are.equal('/private/f1/preview', calls[3].body)
+    end)
+end)
+
+
+describe('WildCatalogBatch Lightroom rendering', function()
+    it('negotiates a distinct Lightroom-rendered representation and uploads only on request', function()
+        local rendered = { frame_id = 'f1', representation_id = 'lightroom-render', role = 'rendered' }
+        local options, calls = fixture({
+            reply(201, progress({ asset('f1', 'full') })),
+            reply(200, progress()),
+            reply(200, progress({ rendered })),
+            reply(200, progress()),
+            reply(200, progress({}, { result('f1'), result('f2') }, {}, 'completed')),
+        })
+        local renders = 0
+        options.transport.get = function(url)
+            assert.is_truthy(url:match('/capabilities$'))
+            return { status = 200, body = '{"lightroom_render_fallback":true}' }
+        end
+        options.resolveRendered = function(id)
+            assert.are.equal('f1', id)
+            renders = renders + 1
+            return '/tmp/adobe.jpg'
+        end
+        local input = manifest()
+        Batch.run(input, options)
+        assert.are.equal(1, renders)
+        assert.are.equal(2, #input.frames[1].representations)
+        local wire = JSON:decode(calls[1].body)
+        assert.are.equal('rendered', wire.frames[1].representations[3].role)
+        assert.are.equal('/tmp/adobe.jpg', calls[4].body)
+        assert.are.equal('PUT', calls[4].method)
+    end)
+
+    it('retains the older manifest when the server does not support rendering', function()
+        local options, calls = fixture({
+            reply(201, progress({}, { result('f1'), result('f2') }, {}, 'completed')),
+        })
+        options.transport.get = function() return { status = 404 } end
+        options.resolveRendered = function() error('must not render') end
+        Batch.run(manifest(), options)
+        local wire = JSON:decode(calls[1].body)
+        assert.are.equal(2, #wire.frames[1].representations)
+    end)
+end)

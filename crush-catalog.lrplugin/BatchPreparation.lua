@@ -12,6 +12,7 @@ end
 
 local Manifest = assert(loadfile(pluginPath() .. '/Core/BatchManifest.lua'))()
 local Preview = assert(loadfile(pluginPath() .. '/Core/RawPreview.lua'))()
+local LightroomRender = assert(loadfile(pluginPath() .. '/LightroomRender.lua'))()
 local Preparation = {}
 
 local function meaningful(value)
@@ -110,22 +111,59 @@ function Preparation.prepare(photos, options)
     })
 end
 
--- Call inside a Lightroom asynchronous task. No catalog writes.
+-- Share one lazily initialized renderer across all batches in an identification run.
+function Preparation.renderRun()
+    local render, cleanup, finish
+    return {
+        render = function(photo)
+            if not render then
+                local ok
+                ok, render, cleanup, finish = LrTasks.pcall(LightroomRender.create)
+                if not ok then render, cleanup, finish = nil, nil, nil; return nil end
+            end
+            return render(photo)
+        end,
+        cleanup = function() return not cleanup or cleanup() end,
+        finish = function() return not finish or finish() end,
+    }
+end
+
+-- Call inside a Lightroom asynchronous task.
 -- The caller retains plan.items to map final results to the original photos.
 function Preparation.run(plan, identifyBatch, options)
     options = options or {}
+    local run = options.renderRun or Preparation.renderRun()
+    local function close()
+        local removed = plan.close()
+        local renderedRemoved = run.cleanup()
+        return removed and renderedRemoved
+    end
+    local function resolveRendered(id)
+        local entry = plan.items and plan.items[id]
+        if not entry or not Preparation.isCurrent(entry.item) then return nil end
+        local path = run.render(entry.item.photo)
+        -- A temporary virtual copy must not invalidate the master's snapshot.
+        if path and Preparation.isCurrent(entry.item) then return path end
+        return nil
+    end
     local ok, result = LrTasks.pcall(identifyBatch, plan.manifest, {
         baseUrl = options.baseUrl,
+        forceUpload = options.forceUpload,
         isCanceled = options.isCanceled,
         isUploadCanceled = options.isUploadCanceled,
         onProgress = options.onProgress,
         onCompleted = options.onCompleted and function(final, getCrop)
-            if not plan.close() then error('Temporary preview cleanup failed', 0) end
+            if not close() then error('Temporary image cleanup failed', 0) end
             return options.onCompleted(final, getCrop)
         end or nil,
         resolveAsset = plan.resolveAsset,
+        resolveLocalSource = plan.resolveLocalSource,
+        resolveRendered = resolveRendered,
     })
-    local cleanupOk, removed = LrTasks.pcall(plan.close)
+    local cleanupOk, removed = LrTasks.pcall(close)
+    local finishOk, finished = true, true
+    if not options.renderRun then finishOk, finished = LrTasks.pcall(run.finish) end
+    if not finishOk or not finished then error('Temporary virtual copy cleanup failed', 0) end
     if not cleanupOk or not removed then
         error('Temporary preview cleanup failed', 0)
     end

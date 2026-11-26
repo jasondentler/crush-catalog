@@ -253,7 +253,8 @@ local function identifyBatchPhotos(photos, options, progress, failures)
     trace('Batch preparation: plans=' .. #plans .. ', preview candidates=' .. previewCount
         .. ', excluded=' .. #excluded)
     traceJson('Preview eligibility blockers', previewBlockers)
-    local report = Execution.run(plans, excluded, {
+    local renderRun = Preparation.renderRun()
+    local executed, report = LrTasks.pcall(Execution.run, plans, excluded, {
         protect = LrTasks.pcall,
         isCanceled = canceled,
         isWriteCanceled = function() return progress:isCanceled() end,
@@ -276,6 +277,7 @@ local function identifyBatchPhotos(photos, options, progress, failures)
             end
             return Confirmation.run(plan, WildCatalogApi.identifyBatch, {
                 mode = options.mode, threshold = options.threshold, language = language,
+                renderRun = renderRun,
                 isCanceled = canceled,
                 onReviewPlan = function(planSummary) traceJson('Batch review plan', planSummary) end,
                 onProgress = function(done)
@@ -288,6 +290,11 @@ local function identifyBatchPhotos(photos, options, progress, failures)
             updateProgress(finished)
         end,
     })
+    local cleaned, cleanupResult = LrTasks.pcall(renderRun.finish)
+    if not cleaned or not cleanupResult then
+        error('Temporary virtual copy cleanup failed; cleanup collection retained', 0)
+    end
+    if not executed then error(report, 0) end
     if report.canceled then progress:cancel() end
     traceJson('Batch execution report', report)
     local summary = string.format(

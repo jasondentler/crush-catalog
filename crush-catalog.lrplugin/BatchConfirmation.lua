@@ -84,6 +84,7 @@ function Confirmation.run(plan, identifyBatch, options)
     plan.manifest.compact_progress = true
     return Preparation.run(plan, identifyBatch, {
         baseUrl = options.baseUrl,
+        renderRun = options.renderRun,
         isCanceled = options.isCanceled,
         isUploadCanceled = options.isUploadCanceled,
         onProgress = options.onProgress,

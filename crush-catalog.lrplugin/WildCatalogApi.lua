@@ -18,6 +18,7 @@ local Http = assert(loadfile(pluginPath() .. '/Http.lua'))()
 local Identify = assert(loadfile(pluginPath() .. '/Core/WildCatalogIdentify.lua'))()
 local Search = assert(loadfile(pluginPath() .. '/Core/WildCatalogSearch.lua'))()
 local Batch = assert(loadfile(pluginPath() .. '/Core/WildCatalogBatch.lua'))()
+local LocalTransport = assert(loadfile(pluginPath() .. '/LocalTransport.lua'))()
 
 local function trim(value)
     if value == nil then
@@ -77,7 +78,10 @@ function WildCatalogApi.identifyBatch(manifest, options)
         json = JSON,
         diagnostics = true,
         protect = LrTasks.pcall,
+        localSession = options.forceUpload ~= true and LocalTransport.session or nil,
         resolveAsset = options.resolveAsset,
+        resolveLocalSource = options.resolveLocalSource,
+        resolveRendered = options.resolveRendered,
         isCanceled = options.isCanceled,
         onProgress = options.onProgress,
         onCompleted = options.onCompleted,

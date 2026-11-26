@@ -25,7 +25,7 @@ return {
 				f:static_text({
 					title = LOC(
 						"$$$/CrushCatalog/InfoProvider/BackendUrl/Instructions="
-							.. "Where is Wild Catalog running? Usually leave this setting unchanged. "
+							.. "Usually leave this setting unchanged. Crush Catalog automatically chooses how to access your photos. "
 							.. "Use HTTPS if it runs on another computer or server."
 					),
 					width = 520,
@@ -48,13 +48,14 @@ return {
 						),
 					}),
 				}),
+
+
 			},
 		}
 	end,
 
 	startDialog = function(propertyTable)
 		propertyTable.backendUrl = tostring(prefs.backendUrl or DEFAULT_BACKEND_URL)
-
 		propertyTable:addObserver("backendUrl", function()
 			savePreferences(propertyTable)
 		end)
@@ -62,5 +63,6 @@ return {
 
 	endDialog = function(propertyTable)
 		savePreferences(propertyTable)
+
 	end,
 }

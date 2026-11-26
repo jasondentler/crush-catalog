@@ -23,7 +23,8 @@ local function indexManifest(manifest)
         for _, spec in ipairs(frame.representations or {}) do
             requireCondition(identifier(spec.representation_id)
                 and not assets[spec.representation_id], 'Invalid representation identifier')
-            requireCondition(spec.role == 'preview' or spec.role == 'full', 'Invalid asset role')
+            requireCondition(spec.role == 'preview' or spec.role == 'full'
+                or spec.role == 'rendered', 'Invalid asset role')
             assets[spec.representation_id] = spec.role
         end
         frames[frame.frame_id] = assets
@@ -209,6 +210,35 @@ function Batch.run(manifest, options)
 
     local ok, result = protect(function()
         checkCanceled()
+        if options.resolveRendered and transport.get then
+            local fetched, response = protect(transport.get, base .. '/capabilities', headers())
+            local parsed, capabilities
+            if fetched and type(response) == 'table' and response.status == 200 then
+                parsed, capabilities = pcall(json.decode, json, response.body)
+            end
+            if parsed and type(capabilities) == 'table'
+                and capabilities.lightroom_render_fallback == true then
+                local wire = {}
+                for key, value in pairs(manifest) do wire[key] = value end
+                wire.frames = {}
+                for index, frame in ipairs(manifest.frames) do
+                    local copy = {}
+                    for key, value in pairs(frame) do copy[key] = value end
+                    copy.representations = {}
+                    for _, spec in ipairs(frame.representations) do
+                        copy.representations[#copy.representations + 1] = spec
+                    end
+                    copy.representations[#copy.representations + 1] = {
+                        representation_id = 'lightroom-render', role = 'rendered',
+                        filename = 'lightroom-render.jpg',
+                    }
+                    wire.frames[index] = copy
+                end
+                manifest = wire
+                frames = indexManifest(manifest)
+            end
+        end
+        checkCanceled()
         local progress = observed(transport.request('POST', base, json:encode(manifest),
             headers()), 201)
         stage = 'validate create response'
@@ -219,9 +249,16 @@ function Batch.run(manifest, options)
         batchUrl, token = base .. '/' .. progress.batch_id, progress.batch_token
         local batchId = progress.batch_id
         local resolved = {}
-        -- Each asset can be resolved once; an advance can open a new window
-        -- or discover a full-quality fallback. Bound malformed-server loops.
-        for _ = 1, #manifest.frames * 5 + 2 do
+        local localAsset
+        if options.localSession then
+            local available, session = protect(options.localSession, {
+                base = base, baseUrl = options.baseUrl, json = json,
+                transport = transport, protect = protect,
+            })
+            if available and type(session) == 'function' then localAsset = session end
+        end
+        -- A local asset may be requested again once for HTTP replacement.
+        for _ = 1, #manifest.frames * 10 + 2 do
             checkCanceled()
             stage = 'validate progress'
             validateProgress(progress, batchId)
@@ -257,31 +294,62 @@ function Batch.run(manifest, options)
                 local request = progress.requested[1]
                 local id, rep = request.frame_id, request.representation_id
                 requireCondition(frames[id] and frames[id][rep] == request.role
-                    and (request.role == 'preview' or request.role == 'full'),
+                    and (request.role == 'preview' or request.role == 'full'
+                        or request.role == 'rendered'),
                     'Server requested an undeclared asset')
                 local key = id .. ':' .. rep
-                requireCondition(not resolved[key], 'Server repeated a resolved request')
-                resolved[key] = true
+                requireCondition(resolved[key] ~= 'http', 'Server repeated a resolved request')
+                local tryLocal = localAsset and not resolved[key] and request.role ~= 'rendered'
                 local url = batchUrl .. '/frames/' .. id .. '/representations/' .. rep
                 stage, status = 'resolve ' .. request.role, nil
-                local path = options.resolveAsset(id, rep, request.role)
-                checkCanceled()
-                if path then
-                    stage = 'upload ' .. request.role
-                    requestedFilename = nil
-                    for _, frame in ipairs(manifest.frames) do
-                        if frame.frame_id == id then
-                            for _, spec in ipairs(frame.representations) do
-                                if spec.representation_id == rep then requestedFilename = spec.filename end
-                            end
+                local path, usedLocal
+                if tryLocal then
+                    if options.resolveLocalSource then
+                        path = options.resolveLocalSource(id, rep, request.role)
+                    elseif request.role == 'full' then
+                        path = options.resolveAsset(id, rep, request.role)
+                    end
+                    checkCanceled()
+                    if path then
+                        stage = 'local ' .. request.role
+                        local available, response = protect(
+                            localAsset, url, path, request.role, batchUrl, headers(token))
+                        checkCanceled()
+                        if available and type(response) == 'table' and response.status == 200 then
+                            progress = observed(response, 200)
+                            resolved[key] = 'local'
+                            usedLocal = true
                         end
                     end
-                    progress = observed(transport.upload(url, path,
-                        headers(token, 'application/octet-stream')), 200)
-                else
-                    stage = 'declare unavailable ' .. request.role
-                    progress = observed(transport.request('POST', url .. '/unavailable',
-                        '', headers(token)), 200)
+                end
+                if not usedLocal then
+                    stage = 'resolve ' .. request.role
+                    if request.role == 'rendered' then
+                        if options.resolveRendered then path = options.resolveRendered(id) end
+                    else
+                        path = options.resolveAsset(id, rep, request.role)
+                    end
+                    checkCanceled()
+                    resolved[key] = 'http'
+                    if path then
+                        stage = 'upload ' .. request.role
+                        requestedFilename = nil
+                        for _, frame in ipairs(manifest.frames) do
+                            if frame.frame_id == id then
+                                for _, spec in ipairs(frame.representations) do
+                                    if spec.representation_id == rep then
+                                        requestedFilename = spec.filename
+                                    end
+                                end
+                            end
+                        end
+                        progress = observed(transport.upload(url, path,
+                            headers(token, 'application/octet-stream')), 200)
+                    else
+                        stage = 'declare unavailable ' .. request.role
+                        progress = observed(transport.request('POST', url .. '/unavailable',
+                            '', headers(token)), 200)
+                    end
                 end
             end
         end
