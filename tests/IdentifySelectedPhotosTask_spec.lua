@@ -44,6 +44,7 @@ describe('IdentifySelectedPhotosTask', function()
         local messages = {}
         local traceCalls = {}
         local selectedPhotos
+        local catalogKeywords = {}
         local task
         local currentTime = 0
         local sleepCalls = 0
@@ -178,6 +179,7 @@ describe('IdentifySelectedPhotosTask', function()
                             getTargetPhotos = function()
                                 return selectedPhotos
                             end,
+                            getKeywords = function() return catalogKeywords end,
                         }
                     end,
                 },
@@ -357,20 +359,38 @@ describe('IdentifySelectedPhotosTask', function()
                 }
             end,
         }
+        local function keyword(name, children, synonyms, photos)
+            return {
+                getName = function() return name end,
+                getChildren = function() return children or {} end,
+                getSynonyms = function() return synonyms or {} end,
+                getPhotos = function() return photos or {} end,
+            }
+        end
+        local species = keyword('corax', nil, { 'Common Raven', 'Corvus corax' }, { photo })
         local batchWrites = 0
         package.loaded.PhotoMetadata.recordBatch = function(entries, validate)
             batchWrites = batchWrites + 1
             assert.are.equal(1, #entries)
             assert.are.equal(photo, entries[1].photo)
             assert.is_true(validate())
+            catalogKeywords = { keyword('Crush Catalog', {
+                keyword('Scientific Names', { keyword('Corvus', { species }) }),
+            }) }
             return 'executed'
         end
         batchOptions.engine = 'batch'
         identifyCalls = {}
         component.identifySelectedPhotos()
-        assert.are.equal('2 of 2 - 0 remaining', progress.caption)
+        assert.are.equal('Counting identified species', progress.caption)
         assert.are.equal(0, #identifyCalls)
         assert.are.equal(1, batchWrites)
+        assert.matches('Photos tagged: 1', messages[#messages].message, 1, true)
+        assert.matches('Species identified: 1', messages[#messages].message, 1, true)
+        assert.matches('New lifers: 1', messages[#messages].message, 1, true)
+        assert.matches('Common Raven', messages[#messages].message, 1, true)
+        assert.matches('Catalog species total: 1', messages[#messages].message, 1, true)
+        assert.is_nil(messages[#messages].message:find('Preview candidates', 1, true))
 
         -- A failed frame must appear in the final summary with its filename.
         plan.items.b.item.photo = photo
@@ -383,8 +403,9 @@ describe('IdentifySelectedPhotosTask', function()
         end
         component.identifySelectedPhotos()
         assert.are.equal(2, batchWrites)
-        assert.matches('Failed: 1', messages[#messages].message, 1, true)
-        assert.matches('Withheld: 0', messages[#messages].message, 1, true)
+        assert.matches('Could not process: 1', messages[#messages - 1].message, 1, true)
+        assert.matches('1 photo not tagged', messages[#messages - 1].message, 1, true)
+        assert.matches('New lifers: 0', messages[#messages - 1].message, 1, true)
         assert.matches('bird.jpg: Image too large for identification', messages[#messages].message, 1, true)
 
         -- Single-image transport failures must not reach confirmation or metadata writes.

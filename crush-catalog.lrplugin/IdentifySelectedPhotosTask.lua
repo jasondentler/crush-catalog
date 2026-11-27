@@ -208,6 +208,21 @@ local function identifyBatchPhotos(photos, options, progress, failures)
     local Preparation = require 'BatchPreparation'
     local Confirmation = require 'BatchConfirmation'
     local Execution = assert(loadfile(pluginPath() .. '/Core/BatchExecution.lua'))()
+    local SpeciesSummary = assert(loadfile(pluginPath() .. '/Core/SpeciesSummary.lua'))()
+    local SummaryDialog = assert(loadfile(pluginPath() .. '/BatchSummaryDialog.lua'))()
+    local startedAt = LrDate.currentTime()
+    local catalog = LrApplication.activeCatalog()
+    local writtenPhotos = {}
+    local function snapshot(photosToCount)
+        local ok, result = LrTasks.pcall(SpeciesSummary.snapshot, catalog, photosToCount)
+        if not ok then
+            trace('Unable to count catalog species: ' .. tostring(result))
+            return nil
+        end
+        return result
+    end
+    progress:setCaption('Checking catalog species')
+    local beforeSpecies = snapshot()
     local language = LrLocalization.currentLanguage()
     local pausedSeconds = 0
     local function canceled()
@@ -260,7 +275,15 @@ local function identifyBatchPhotos(photos, options, progress, failures)
         isWriteCanceled = function() return progress:isCanceled() end,
         isCurrent = Preparation.isCurrent,
         isReprocessing = hasCrushCatalogMetadata,
-        record = PhotoMetadata.recordBatch,
+        record = function(entries, validate)
+            local status, warning = PhotoMetadata.recordBatch(entries, validate)
+            if status == 'executed' then
+                for _, entry in ipairs(entries) do
+                    writtenPhotos[#writtenPhotos + 1] = entry.photo
+                end
+            end
+            return status, warning
+        end,
         report = function(item, reason)
             local metadata = { originalFilename = 'Batch' }
             if item and item.photo then
@@ -297,44 +320,11 @@ local function identifyBatchPhotos(photos, options, progress, failures)
     if not executed then error(report, 0) end
     if report.canceled then progress:cancel() end
     traceJson('Batch execution report', report)
-    local summary = string.format(
-        'Selected: %d\nPreview candidates: %d\nApproved: %d\nWritten: %d\n'
-            .. 'Withheld: %d\nExcluded: %d\nFailed: %d',
-        #photos, previewCount, report.approved, report.written,
-        report.skipped, report.excluded, report.failed)
-    local reasons = {}
-    for reason, count in pairs(previewBlockers) do
-        reasons[#reasons + 1] = reason .. ': ' .. count
-    end
-    table.sort(reasons)
-    if #reasons > 0 then summary = summary .. '\n\nPreview blockers:\n' .. table.concat(reasons, '\n') end
-    if #failures > 0 then
-        summary = summary .. '\n\nIssues:\n' .. table.concat(failures, '\n')
-    end
-    if report.canceled then
-        summary = summary .. '\nCanceled; earlier completed writes remain.'
-    end
-    if #report.warnings > 0 then
-        summary = summary .. '\n\nWarnings:\n' .. table.concat(report.warnings, '\n')
-    end
-    if #report.operations > 0 then
-        local totals = {}
-        for _, counts in ipairs(report.operations) do
-            for key, value in pairs(counts) do
-                if type(value) == 'number' then totals[key] = (totals[key] or 0) + value end
-            end
-        end
-        summary = summary .. string.format(
-            '\n\nData received: %.1f MB\nFull-quality decodes: %d\n'
-                .. 'Classifier inputs: %d\nReused classifications: %d',
-            (totals.received_bytes or 0) / 1000000, totals.full_decode_attempts or 0,
-            totals.classifier_inputs or 0, totals.reused_classifier_inputs or 0)
-    end
-    summary = summary .. string.format(
-        '\nReview prompts: %d\nFiltered detections: %d (confidence: %d, detail: %d)',
-        report.reviewPrompts or 0, report.suppressedDetections or 0,
-        report.suppressedLowConfidence or 0, report.suppressedLowDetail or 0)
-    LrDialogs.message('Image identification', summary, #failures > 0 and 'warning' or 'info')
+    progress:setCaption('Counting identified species')
+    local species = SpeciesSummary.compare(beforeSpecies, snapshot(writtenPhotos))
+    traceJson('Species summary', species)
+    local elapsed = SpeciesSummary.elapsed(LrDate.currentTime() - startedAt)
+    SummaryDialog.show(report, species, #photos, elapsed, failures)
 end
 
 local function identifySelectedPhotos()
